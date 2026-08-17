@@ -894,6 +894,19 @@ describe('filter chips', () => {
     expect(tui.snapshot().filterLabels).toBeNull();
   }, 30_000);
 
+  it('orders a stopped target by its playbook, not by what the log said first', async () => {
+    const tui = await boot();
+    const at = rowOf(tui.frame(), ROWS[1]!.name, SIDE);
+    await tui.send({ op: 'click', col: 5, row: at });
+    await tui.send({ op: 'settle', ms: 400 });
+
+    expect(tui.snapshot().selected).toBe(ROWS[1]!.slug);
+    expect(tui.snapshot().labels).toEqual(['Build', 'API', 'Web']);
+
+    await tui.send({ op: 'keys', keys: ['1'] });
+    expect(tui.snapshot().filterLabels).toEqual(['Build']);
+  }, 40_000);
+
   it('hides the other labels from the rendered pane once soloed', async () => {
     const tui = await boot();
     await tui.send({ op: 'settle', ms: 200 });

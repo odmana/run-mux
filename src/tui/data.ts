@@ -118,6 +118,40 @@ export function useRunStatus(
   return status;
 }
 
+/**
+ * The selected target's commands in the order its playbook declares them.
+ *
+ * A target that is not running reports no commands, so the only other source of
+ * an order is the log itself — and first-appearance order is not the playbook's.
+ * Fetched once per selection rather than polled: chips that reshuffled between
+ * keystrokes would move a command out from under its number key.
+ */
+export function usePlaybookLabels(link: DaemonLink | null, slug: string | null): string[] {
+  const [labels, setLabels] = useState<string[]>([]);
+
+  useEffect(() => {
+    setLabels([]);
+    if (link === null || slug === null) return;
+    let live = true;
+    void link.request(METHODS.configResolve, { target: slug }).then(
+      (result) => {
+        if (!live) return;
+        setLabels(
+          (result as ConfigResolveResult).playbook.commands.map((command) => command.label),
+        );
+      },
+      () => {
+        // No playbook on disk any more: the log's own order is all there is.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [link, slug]);
+
+  return labels;
+}
+
 /** A drag emits an event per motion report; the daemon does not need every one. */
 export const UI_WRITE_DEBOUNCE_MS = 250;
 

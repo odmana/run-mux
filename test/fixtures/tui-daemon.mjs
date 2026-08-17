@@ -448,7 +448,11 @@ const SUBSCRIPTIONS = {
   'logs.follow': (params, emit, id) => {
     const target = resolveTarget(params);
     followers.set(id, { target: target.slug, emit });
-    for (const entry of SEED) {
+    // A target with no live run reports no commands, so its chips can only be
+    // ordered from its playbook. Replaying its history backwards is what makes
+    // that visible: arrival order and playbook order disagree.
+    const replay = target.commands.length > 0 ? SEED : [...SEED].reverse();
+    for (const entry of replay) {
       if (params.label && entry.label !== params.label) continue;
       emit.data({ ...entry, ts: Date.now() });
     }

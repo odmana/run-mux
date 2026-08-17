@@ -17,6 +17,7 @@ import { copyToClipboard } from './clipboard.js';
 import {
   useLogStream,
   usePickerCache,
+  usePlaybookLabels,
   useRunStatus,
   useTargets,
   useUiState,
@@ -34,7 +35,7 @@ import {
   HEADER_HEIGHT,
   LogPane,
 } from './logpane.js';
-import { moveInto, NO_ORDER, type SidebarOrder } from './order.js';
+import { moveInto, NO_ORDER, sortByOrder, type SidebarOrder } from './order.js';
 import { Palette, type PaletteForm } from './palette.js';
 import {
   applyFieldValue,
@@ -228,6 +229,7 @@ export function App(props: AppProps): ReactElement {
 
   const live = useRunStatus(props.link, selected, props.statusPollMs);
   const current = live ?? targets.find((target) => target.slug === selected) ?? null;
+  const declared = usePlaybookLabels(props.link, selected);
 
   const cache = usePickerCache(props.link, targets);
   // Destructured because the hook hands back a fresh object each render while
@@ -281,11 +283,14 @@ export function App(props: AppProps): ReactElement {
     retain: props.retain,
   });
 
+  // A running target's commands already arrive in playbook order; a stopped one
+  // has only the labels the log happened to mention, which is arrival order, so
+  // the playbook is what puts the chips back in step.
   const labels = useMemo(() => {
     const fromCommands = current?.commands?.map((command) => command.label) ?? [];
     if (fromCommands.length > 0) return fromCommands;
-    return logs.labels;
-  }, [current, logs.labels]);
+    return sortByOrder(logs.labels, (label) => label, declared);
+  }, [current, logs.labels, declared]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
