@@ -1,0 +1,4 @@
+allowBuilds:
+  # vitest's bundler; its postinstall fetches the platform binary, so tests
+  # cannot run without it.
+  esbuild: true

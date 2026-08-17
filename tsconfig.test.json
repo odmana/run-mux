@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The base config emits from src/; this one only typechecks, and has to
+    // reach test/ and the vitest config too.
+    "rootDir": "."
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
