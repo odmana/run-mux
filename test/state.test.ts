@@ -12,6 +12,8 @@ import {
   listSlots,
   listTargets,
   loadState,
+  loadUi,
+  mergeUi,
   releaseSlot,
   removeChild,
   removeTarget,
@@ -160,6 +162,32 @@ describe('state file', () => {
     addChild(child(11));
     addChild({ ...child(11), label: 'api' });
     expect(loadState().children).toEqual([{ ...child(11), label: 'api' }]);
+  });
+});
+
+describe('ui state', () => {
+  it('reads as empty before anything has been stored', () => {
+    expect(loadUi()).toEqual({});
+  });
+
+  it('merges field by field, leaving the untouched ones alone', () => {
+    mergeUi({ sidebarWidth: 44 });
+    mergeUi({ collapsedRepos: [REPO_A] });
+    expect(loadUi()).toEqual({ sidebarWidth: 44, collapsedRepos: [REPO_A] });
+
+    mergeUi({ sidebarWidth: 28 });
+    expect(loadUi()).toEqual({ sidebarWidth: 28, collapsedRepos: [REPO_A] });
+  });
+
+  it('does not disturb the rest of the state', () => {
+    addChild(child(11));
+    updateState({ targets: [target('orders/main:dev')] });
+    mergeUi({ sidebarWidth: 44 });
+
+    const state = simulateRestart();
+    expect(state.children).toEqual([child(11)]);
+    expect(state.targets).toEqual([target('orders/main:dev')]);
+    expect(state.ui).toEqual({ sidebarWidth: 44 });
   });
 });
 

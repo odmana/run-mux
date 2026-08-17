@@ -42,12 +42,16 @@ import {
   type TargetRemoveResult,
   type TargetUpdateResult,
   type TargetView,
+  type UiGetResult,
+  type UiSetResult,
 } from '../protocol.js';
 import {
   aliasMap,
   allocateSlot,
   createTarget,
   listTargets,
+  loadUi,
+  mergeUi,
   mutateState,
   removeTarget,
   resolveTarget,
@@ -61,6 +65,7 @@ import {
   PROTOCOL_VERSION,
   type TargetRecord,
   type TargetStatus,
+  type UiState,
 } from '../types.js';
 import type { Registry, RunEntry } from './registry.js';
 
@@ -325,6 +330,10 @@ export function createMethods(ctx: DaemonContext): RequestHandler {
         }));
       return { vars, problems };
     },
+
+    [METHODS.uiGet]: (): UiGetResult => ({ ui: loadUi() }),
+
+    [METHODS.uiSet]: (params): UiSetResult => ({ ui: mergeUi(uiPatch(params)) }),
   });
 }
 
@@ -637,6 +646,26 @@ function optionalNumber(params: unknown, key: string): number | undefined {
     throw rpcError('bad_params', `"${key}" must be a number`);
   }
   return value;
+}
+
+function optionalStringArray(params: unknown, key: string): string[] | undefined {
+  const value = isRecord(params) ? params[key] : undefined;
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw rpcError('bad_params', `"${key}" must be an array of strings`);
+  }
+  return value as string[];
+}
+
+/** Unknown keys are dropped rather than stored, so a newer TUI cannot smuggle junk into state. */
+function uiPatch(params: unknown): UiState {
+  const ui = isRecord(params) ? params.ui : undefined;
+  const patch: UiState = {};
+  const sidebarWidth = optionalNumber(ui, 'sidebarWidth');
+  const collapsedRepos = optionalStringArray(ui, 'collapsedRepos');
+  if (sidebarWidth !== undefined) patch.sidebarWidth = Math.max(0, Math.round(sidebarWidth));
+  if (collapsedRepos !== undefined) patch.collapsedRepos = collapsedRepos;
+  return patch;
 }
 
 function logFilter(params: unknown): LogQuery {

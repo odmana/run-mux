@@ -16,7 +16,14 @@
 // Test-only extras, deliberately outside protocol.ts:
 //   test.flood      {target?, lines, label?, ansi?}  push lines to every open follow
 //   test.followers  {}                               how many follows are open, and on what
-import { appendFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -222,6 +229,24 @@ const ENV_VARS = [
   { name: 'MUX_SLOT', value: '1', source: 'injected' },
 ];
 
+// On disk rather than in memory so a test can reset it between cases by
+// deleting the file, without having to reach through a live connection.
+const UI_STATE = join(STATE, 'tui-daemon-ui.json');
+
+function loadUi() {
+  try {
+    return JSON.parse(readFileSync(UI_STATE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveUi(patch) {
+  const next = { ...loadUi(), ...patch };
+  writeFileSync(UI_STATE, JSON.stringify(next));
+  return next;
+}
+
 // --- protocol ---------------------------------------------------------------
 
 class Failure extends Error {
@@ -330,6 +355,8 @@ const METHODS = {
     resolveTarget(params);
     return { vars: ENV_VARS, problems: [] };
   },
+  'ui.get': () => ({ ui: loadUi() }),
+  'ui.set': (params) => ({ ui: saveUi(params?.ui ?? {}) }),
 };
 
 /** stream id -> { target, emit } for every open follow, across every socket. */

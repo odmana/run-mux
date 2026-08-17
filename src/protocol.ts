@@ -7,7 +7,15 @@
  * is served through the ipc layer's `subscription()` helper rather than a value.
  */
 
-import type { Checkout, CommandState, LogEntry, Playbook, RunMeta, TargetStatus } from './types.js';
+import type {
+  Checkout,
+  CommandState,
+  LogEntry,
+  Playbook,
+  RunMeta,
+  TargetStatus,
+  UiState,
+} from './types.js';
 
 export const METHODS = {
   ping: 'ping',
@@ -35,6 +43,9 @@ export const METHODS = {
   configReload: 'config.reload',
   configResolve: 'config.resolve',
   envResolve: 'env.resolve',
+
+  uiGet: 'ui.get',
+  uiSet: 'ui.set',
 } as const;
 
 /** How a target is named on the wire: a slug, an alias, or a unique prefix. */
@@ -228,6 +239,22 @@ export interface EnvResolveResult {
   problems: string[];
 }
 
+/**
+ * The TUI's own view state, parked in the daemon because the daemon owns the
+ * state file: the TUI is a second process, and a whole-file write from it would
+ * land on top of whatever the supervisor recorded in between.
+ */
+export interface UiGetResult {
+  ui: UiState;
+}
+/** Only the fields present are written; the rest are left as they are. */
+export interface UiSetParams {
+  ui: UiState;
+}
+export interface UiSetResult {
+  ui: UiState;
+}
+
 /** Maps a method name to its params and result, for typed client helpers. */
 export interface MethodMap {
   [METHODS.ping]: { params: void; result: PingResult };
@@ -249,4 +276,6 @@ export interface MethodMap {
   [METHODS.configReload]: { params: void; result: ConfigReloadResult };
   [METHODS.configResolve]: { params: ConfigResolveParams; result: ConfigResolveResult };
   [METHODS.envResolve]: { params: EnvResolveParams; result: EnvResolveResult };
+  [METHODS.uiGet]: { params: void; result: UiGetResult };
+  [METHODS.uiSet]: { params: UiSetParams; result: UiSetResult };
 }

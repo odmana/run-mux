@@ -8,6 +8,15 @@ import { elapsedSince, fit, padTo, shortName } from './format.js';
 import { TARGET_COLOUR, TARGET_DOT, UI } from './theme.js';
 
 export const SIDEBAR_WIDTH = 32;
+/** Below this the branch and slot columns collapse into nothing useful. */
+export const SIDEBAR_MIN_WIDTH = 20;
+/** The log pane is the point of the TUI; the sidebar never squeezes it past this. */
+export const MAIN_MIN_WIDTH = 24;
+
+export function clampSidebarWidth(width: number, terminalWidth: number): number {
+  const max = Math.max(SIDEBAR_MIN_WIDTH, terminalWidth - MAIN_MIN_WIDTH);
+  return Math.min(max, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
 
 export interface RepoGroup {
   repoPath: string;
@@ -51,11 +60,15 @@ export interface SidebarProps {
   collapsed: ReadonlySet<string>;
   now: number;
   width?: number;
+  /** The right border doubles as the resize grip, and says so by lighting up. */
+  edgeLit: boolean;
   onSelect: (slug: string, x: number, y: number) => void;
   onContext: (slug: string) => void;
   onAction: (slug: string, action: RowAction) => void;
   onToggleGroup: (repoPath: string) => void;
   onHover: (slug: string | null) => void;
+  onEdge: (overEdge: boolean) => void;
+  onResizeStart: () => void;
 }
 
 interface Columns {
@@ -219,6 +232,10 @@ export function Sidebar(props: SidebarProps): ReactElement {
     );
   }
 
+  // The sidebar sits at column 0, so its right border is the last column it owns.
+  // Nothing is drawn there, which is what lets the box itself answer the press.
+  const edge = width - 1;
+
   return box(
     {
       id: 'sidebar',
@@ -228,8 +245,13 @@ export function Sidebar(props: SidebarProps): ReactElement {
         flexShrink: 0,
         flexDirection: 'column',
         border: true,
-        borderColor: UI.border,
+        borderColor: props.edgeLit ? UI.accent : UI.border,
       },
+      onMouseDown: (event) => {
+        if (event.x >= edge) props.onResizeStart();
+      },
+      onMouseMove: (event) => props.onEdge(event.x >= edge),
+      onMouseOut: () => props.onEdge(false),
     },
     ...children,
   );

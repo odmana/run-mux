@@ -13,6 +13,15 @@ import { METHODS } from '../protocol.js';
 export type MethodName = (typeof METHODS)[keyof typeof METHODS];
 
 /**
+ * Methods the palette deliberately has no entry for: the TUI's own view state,
+ * which it reads and writes as a side effect of the mouse. "Set sidebar width"
+ * is not a thing to go looking for in a command list.
+ */
+export const INTERNAL_METHODS = [METHODS.uiGet, METHODS.uiSet] as const;
+
+export type VerbMethodName = Exclude<MethodName, (typeof INTERNAL_METHODS)[number]>;
+
+/**
  * `repo`, `checkout`, `playbook`, `target` and `label` are answered from a fuzzy
  * picker (see `picker.ts`) rather than typed, which is what keeps the four
  * identifier schemes — repo path, checkout path, playbook name, target slug —
@@ -43,7 +52,7 @@ export interface VerbField {
 }
 
 export interface Verb {
-  method: MethodName;
+  method: VerbMethodName;
   title: string;
   /** The equivalent shell invocation, shown so the palette teaches the CLI. */
   cli: string;
@@ -71,7 +80,7 @@ const label: VerbField = {
 };
 const command: VerbField = { ...label, name: 'command' };
 
-export const VERBS: Record<MethodName, Verb> = {
+export const VERBS: Record<VerbMethodName, Verb> = {
   [METHODS.targetList]: {
     method: METHODS.targetList,
     title: 'List targets',

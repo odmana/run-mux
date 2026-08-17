@@ -13,7 +13,7 @@
 import { connect, type IpcClient } from '../../src/ipc/index.js';
 import { socketPath } from '../../src/paths.js';
 import { App, type AppSnapshot } from '../../src/tui/app.js';
-import { click, feed, move, wheel } from './sgr.js';
+import { click, drag, feed, move, wheel } from './sgr.js';
 
 const { testRender } = await import('@opentui/react/test-utils');
 const { createElement } = await import('react');
@@ -32,6 +32,16 @@ export type HarnessCommand =
   | { id: number; op: 'click'; col: number; row: number; button?: number; mods?: number }
   | { id: number; op: 'wheel'; col: number; row: number; dir: 'up' | 'down'; n?: number }
   | { id: number; op: 'move'; col: number; row: number }
+  | {
+      id: number;
+      op: 'drag';
+      fromCol: number;
+      fromRow: number;
+      toCol: number;
+      toRow: number;
+      button?: number;
+      steps?: number;
+    }
   | { id: number; op: 'keys'; keys: string[] }
   | { id: number; op: 'resize'; width: number; height: number }
   | { id: number; op: 'request'; method: string; params?: unknown }
@@ -52,6 +62,7 @@ const HEIGHT = Number(process.env.TUI_HARNESS_HEIGHT ?? 30);
 const COALESCE_MS = Number(process.env.TUI_HARNESS_COALESCE_MS ?? 80);
 const POLL_MS = Number(process.env.TUI_HARNESS_POLL_MS ?? 250);
 const RETAIN = Number(process.env.TUI_HARNESS_RETAIN ?? 50_000);
+const UI_WRITE_MS = Number(process.env.TUI_HARNESS_UI_MS ?? 30);
 
 let latest: AppSnapshot | null = null;
 let copied: string | null = null;
@@ -77,6 +88,7 @@ const { renderer, flush, captureCharFrame, resize } = await testRender(
     statusPollMs: POLL_MS,
     coalesceMs: COALESCE_MS,
     retain: RETAIN,
+    uiWriteMs: UI_WRITE_MS,
   }),
   { width: WIDTH, height: HEIGHT, targetFps: 60 },
 );
@@ -118,6 +130,16 @@ async function run(command: HarnessCommand): Promise<unknown> {
       return undefined;
     case 'move':
       move(renderer.stdin, command.col, command.row);
+      await settle();
+      return undefined;
+    case 'drag':
+      drag(
+        renderer.stdin,
+        [command.fromCol, command.fromRow],
+        [command.toCol, command.toRow],
+        command.button ?? 0,
+        command.steps,
+      );
       await settle();
       return undefined;
     case 'keys':

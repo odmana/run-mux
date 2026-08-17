@@ -18,8 +18,9 @@ import {
   type RunResult,
   type TargetListResult,
   type TargetView,
+  type UiGetResult,
 } from '../protocol.js';
-import type { LogEntry, RpcError } from '../types.js';
+import type { LogEntry, RpcError, UiState } from '../types.js';
 import { LogBuffer, type LogFilter, type LogLine } from './log-buffer.js';
 import type { CommandChoice, Loadable, PickerKind, ScopedLoadable } from './picker.js';
 
@@ -115,6 +116,77 @@ export function useRunStatus(
   }, [link, slug, pollMs]);
 
   return status;
+}
+
+/** A drag emits an event per motion report; the daemon does not need every one. */
+export const UI_WRITE_DEBOUNCE_MS = 250;
+
+export interface UiStore {
+  /** Empty until the daemon answers, so callers must have a default of their own. */
+  ui: UiState;
+  loaded: boolean;
+  patch: (patch: UiState) => void;
+}
+
+/**
+ * The TUI's view state, held by the daemon.
+ *
+ * Writes are debounced and merged field-wise, and a daemon too old to know the
+ * methods is not an error: the TUI runs on its defaults and simply stops
+ * remembering, which beats refusing to start over a sidebar width.
+ */
+export function useUiState(link: DaemonLink | null, debounceMs = UI_WRITE_DEBOUNCE_MS): UiStore {
+  const [ui, setUi] = useState<UiState>({});
+  const [loaded, setLoaded] = useState(false);
+  const unsent = useRef<UiState>({});
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linkRef = useRef(link);
+  linkRef.current = link;
+
+  useEffect(() => {
+    if (link === null) {
+      setLoaded(true);
+      return;
+    }
+    let live = true;
+    void link.request(METHODS.uiGet).then(
+      (result) => {
+        if (!live) return;
+        setUi((result as UiGetResult).ui ?? {});
+        setLoaded(true);
+      },
+      () => {
+        if (live) setLoaded(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [link]);
+
+  const flush = useCallback(() => {
+    timer.current = null;
+    const pending = unsent.current;
+    unsent.current = {};
+    if (linkRef.current === null || Object.keys(pending).length === 0) return;
+    // Nothing reads the reply: the local copy is already the newer one.
+    void linkRef.current.request(METHODS.uiSet, { ui: pending }).catch(() => undefined);
+  }, []);
+
+  const patch = useCallback(
+    (next: UiState) => {
+      setUi((current) => ({ ...current, ...next }));
+      unsent.current = { ...unsent.current, ...next };
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = setTimeout(flush, debounceMs);
+    },
+    [debounceMs, flush],
+  );
+
+  // A quit inside the debounce window would otherwise drop the last change.
+  useEffect(() => () => flush(), [flush]);
+
+  return { ui, loaded, patch };
 }
 
 export interface PickerCache {

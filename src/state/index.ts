@@ -6,11 +6,14 @@ export {
   emptyState,
   listChildren,
   loadState,
+  loadUi,
+  mergeUi,
   mutateState,
   removeChild,
   saveState,
   setChildren,
   TargetRecordSchema,
+  UiStateSchema,
   updateState,
 } from './state.js';
 

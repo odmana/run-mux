@@ -212,6 +212,38 @@ describe('daemon lifecycle', () => {
   });
 });
 
+describe('ui state', () => {
+  it('stores what the TUI sends and answers with it', async () => {
+    const client = await boot();
+    expect(await client.request('ui.get')).toEqual({ ui: {} });
+
+    await client.request('ui.set', { ui: { sidebarWidth: 44 } });
+    await client.request('ui.set', { ui: { collapsedRepos: ['/repos/orders'] } });
+
+    expect(await client.request('ui.get')).toEqual({
+      ui: { sidebarWidth: 44, collapsedRepos: ['/repos/orders'] },
+    });
+    expect(loadState().ui).toEqual({ sidebarWidth: 44, collapsedRepos: ['/repos/orders'] });
+  });
+
+  it('rounds a width and drops keys it does not know', async () => {
+    const client = await boot();
+    await client.request('ui.set', { ui: { sidebarWidth: 41.6, nonsense: 'go away' } });
+    expect(await client.request('ui.get')).toEqual({ ui: { sidebarWidth: 42 } });
+  });
+
+  it('refuses a value of the wrong type rather than storing it', async () => {
+    const client = await boot();
+    expect((await failure(client.request('ui.set', { ui: { sidebarWidth: 'wide' } }))).code).toBe(
+      'bad_params',
+    );
+    expect((await failure(client.request('ui.set', { ui: { collapsedRepos: [7] } }))).code).toBe(
+      'bad_params',
+    );
+    expect(await client.request('ui.get')).toEqual({ ui: {} });
+  });
+});
+
 describe('repos', () => {
   it('registers a real git repo and reports its checkouts and playbooks', async () => {
     const repo = repoWith('add', [

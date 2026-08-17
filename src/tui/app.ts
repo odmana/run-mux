@@ -14,7 +14,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { METHODS, type TargetView } from '../protocol.js';
 import { stripAnsi } from './ansi.js';
 import { copyToClipboard } from './clipboard.js';
-import { useLogStream, usePickerCache, useRunStatus, useTargets, type DaemonLink } from './data.js';
+import {
+  useLogStream,
+  usePickerCache,
+  useRunStatus,
+  useTargets,
+  useUiState,
+  type DaemonLink,
+} from './data.js';
 import { box } from './elements.js';
 import { fit } from './format.js';
 import type { LogFilter, LogLine } from './log-buffer.js';
@@ -37,7 +44,14 @@ import {
   type PickerSource,
   type PickerView,
 } from './picker.js';
-import { groupTargets, Sidebar, SIDEBAR_WIDTH, visibleSlugs, type RowAction } from './sidebar.js';
+import {
+  clampSidebarWidth,
+  groupTargets,
+  Sidebar,
+  SIDEBAR_WIDTH,
+  visibleSlugs,
+  type RowAction,
+} from './sidebar.js';
 import { UI } from './theme.js';
 import { buildParams, filterVerbs, missingFields, type Verb } from './verbs.js';
 
@@ -85,6 +99,7 @@ export interface AppSnapshot {
   collapsed: string[];
   paletteMethods: string[];
   paletteIndex: number;
+  sidebarWidth: number;
   formMethod: string | null;
   formValues: Record<string, string>;
   picker: PickerSnapshot | null;
@@ -107,6 +122,7 @@ export interface AppProps {
   statusPollMs?: number;
   coalesceMs?: number;
   retain?: number;
+  uiWriteMs?: number;
 }
 
 const FOOTER =
@@ -161,7 +177,30 @@ export function App(props: AppProps): ReactElement {
   const [exited, setExited] = useState(false);
   const [lastHit, setLastHit] = useState<{ id: string; seq: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [storedWidth, setStoredWidth] = useState(SIDEBAR_WIDTH);
+  const [edgeLit, setEdgeLit] = useState(false);
   const hitSeq = useRef(0);
+  // The width as of the last drag event, not the last commit: `drag-end` has to
+  // persist what the pointer actually landed on, and React may not have rendered it yet.
+  const widthRef = useRef(SIDEBAR_WIDTH);
+  const resizing = useRef(false);
+
+  const ui = useUiState(props.link, props.uiWriteMs);
+
+  const applyWidth = useCallback((next: number) => {
+    widthRef.current = next;
+    setStoredWidth(next);
+  }, []);
+
+  // One-shot: the daemon's copy seeds the session, and every change after this
+  // is the user's, so a second pass would fight whatever they just did.
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (hydrated.current || !ui.loaded) return;
+    hydrated.current = true;
+    if (ui.ui.sidebarWidth !== undefined) applyWidth(ui.ui.sidebarWidth);
+    if (ui.ui.collapsedRepos !== undefined) setCollapsed(new Set(ui.ui.collapsedRepos));
+  }, [applyWidth, ui.loaded, ui.ui]);
 
   const { targets, refresh } = useTargets(props.link, props.targetPollMs);
   const groups = useMemo(() => groupTargets(targets), [targets]);
@@ -212,7 +251,10 @@ export function App(props: AppProps): ReactElement {
     };
   }, [picker, form, source]);
 
-  const mainWidth = Math.max(10, dimensions.width - SIDEBAR_WIDTH);
+  // Clamped on the way out rather than on the way in, so a width that only fits
+  // a wide terminal survives a spell in a narrow one.
+  const sidebarWidth = clampSidebarWidth(storedWidth, dimensions.width);
+  const mainWidth = Math.max(10, dimensions.width - sidebarWidth);
   const logHeight = Math.max(1, dimensions.height - CHROME_HEIGHT);
 
   const filter = useMemo<LogFilter>(
@@ -434,14 +476,20 @@ export function App(props: AppProps): ReactElement {
     [selected, slugs],
   );
 
-  const toggleGroup = useCallback((repoPath: string) => {
-    setCollapsed((folded) => {
-      const next = new Set(folded);
+  // Destructured for the same reason as `cache`: the store is a fresh object
+  // every render, `patch` is not, and the key handler depends on this callback.
+  const { patch: patchUi } = ui;
+
+  const toggleGroup = useCallback(
+    (repoPath: string) => {
+      const next = new Set(collapsed);
       if (next.has(repoPath)) next.delete(repoPath);
       else next.add(repoPath);
-      return next;
-    });
-  }, []);
+      setCollapsed(next);
+      patchUi({ collapsedRepos: [...next] });
+    },
+    [collapsed, patchUi],
+  );
 
   const verbs = useMemo(() => filterVerbs(paletteQuery), [paletteQuery]);
 
@@ -738,6 +786,7 @@ export function App(props: AppProps): ReactElement {
       collapsed: [...collapsed],
       paletteMethods: verbs.map((verb) => verb.method),
       paletteIndex,
+      sidebarWidth,
       formMethod: form?.verb.method ?? null,
       formValues: form?.values ?? {},
       picker:
@@ -826,14 +875,41 @@ export function App(props: AppProps): ReactElement {
           ? `${fit(status, Math.max(10, mainWidth - 2))}   ${FOOTER}`
           : FOOTER;
 
+  // The resize handlers live on the root because OpenTUI captures on the first
+  // *drag* event, not on the press: flick off a one-column border fast enough
+  // and the log pane owns the capture. Drag events bubble, so the root sees them
+  // whatever grabbed them, and `resizing` is what says they are ours.
   return box(
-    { style: { width: '100%', height: '100%', flexDirection: 'row', backgroundColor: UI.panel } },
+    {
+      style: { width: '100%', height: '100%', flexDirection: 'row', backgroundColor: UI.panel },
+      onMouseDrag: (event) => {
+        if (!resizing.current) return;
+        applyWidth(clampSidebarWidth(event.x + 1, dimensions.width));
+        setEdgeLit(true);
+      },
+      onMouseDragEnd: () => {
+        if (!resizing.current) return;
+        resizing.current = false;
+        setEdgeLit(false);
+        patchUi({ sidebarWidth: widthRef.current });
+      },
+      onMouseUp: () => {
+        resizing.current = false;
+      },
+    },
     Sidebar({
       groups,
       selected,
       hovered,
       collapsed,
       now,
+      width: sidebarWidth,
+      edgeLit,
+      onEdge: setEdgeLit,
+      onResizeStart: () => {
+        resizing.current = true;
+        widthRef.current = sidebarWidth;
+      },
       onSelect: (slug, x, y) => {
         hit(`target:${slug}@${x},${y}`);
         setSelected(slug);

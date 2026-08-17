@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import * as v from 'valibot';
 
 import { statePath } from '../paths.js';
-import type { AppState, ChildRecord } from '../types.js';
+import type { AppState, ChildRecord, UiState } from '../types.js';
 
 const NonNegativeInt = v.pipe(v.number(), v.integer(), v.minValue(0));
 
@@ -24,16 +24,16 @@ export const ChildRecordSchema = v.object({
   targetSlug: v.string(),
 });
 
+export const UiStateSchema = v.object({
+  sidebarWidth: v.optional(v.number()),
+  collapsedRepos: v.optional(v.array(v.string())),
+});
+
 export const AppStateSchema = v.object({
   targets: v.array(TargetRecordSchema),
   slots: v.record(v.string(), NonNegativeInt),
   children: v.array(ChildRecordSchema),
-  ui: v.optional(
-    v.object({
-      sidebarWidth: v.optional(v.number()),
-      collapsedRepos: v.optional(v.array(v.string())),
-    }),
-  ),
+  ui: v.optional(UiStateSchema),
 });
 
 export function emptyState(): AppState {
@@ -103,6 +103,22 @@ export function mutateState(mutate: (state: AppState) => AppState | void): AppSt
   const draft = loadState();
   const next = (mutate(draft) as AppState | undefined) ?? draft;
   return saveState(next);
+}
+
+export function loadUi(): UiState {
+  return loadState().ui ?? {};
+}
+
+/**
+ * Field-wise merge, so the TUI can persist one setting without having to send —
+ * and therefore without having to be the authority on — all the others.
+ */
+export function mergeUi(patch: UiState): UiState {
+  return (
+    mutateState((state) => {
+      state.ui = { ...state.ui, ...patch };
+    }).ui ?? {}
+  );
 }
 
 export function listChildren(): ChildRecord[] {

@@ -94,15 +94,21 @@ export interface ChildRecord {
   targetSlug: string;
 }
 
+/**
+ * TUI view state. The daemon only stores it: nothing in the CLI, the supervisor
+ * or the config layer reads a field here, and an absent one means "the default".
+ */
+export interface UiState {
+  sidebarWidth?: number;
+  collapsedRepos?: string[];
+}
+
 export interface AppState {
   targets: TargetRecord[];
   /** checkoutPath -> slot. Per-repo scoped; the main worktree is always 0. */
   slots: Record<string, number>;
   children: ChildRecord[];
-  ui?: {
-    sidebarWidth?: number;
-    collapsedRepos?: string[];
-  };
+  ui?: UiState;
 }
 
 // ---------------------------------------------------------------------------

@@ -48,3 +48,28 @@ export function wheel(stdin: StdinLike, col: number, row: number, dir: 'up' | 'd
 export function move(stdin: StdinLike, col: number, row: number) {
   feed(stdin, sgr(35, col, row, true));
 }
+
+/** Motion bit. A held button reports as `button | MOTION`, which is what makes it a drag. */
+const MOTION = 32;
+
+/**
+ * Press, several motion reports, release — the intermediate frames matter,
+ * because OpenTUI decides what a drag has captured on the first one.
+ */
+export function drag(
+  stdin: StdinLike,
+  from: [col: number, row: number],
+  to: [col: number, row: number],
+  button: number = BTN.LEFT,
+  steps = 4,
+) {
+  const [fromCol, fromRow] = from;
+  const [toCol, toRow] = to;
+  feed(stdin, sgr(button, fromCol, fromRow, true));
+  for (let step = 1; step <= steps; step++) {
+    const col = Math.round(fromCol + ((toCol - fromCol) * step) / steps);
+    const row = Math.round(fromRow + ((toRow - fromRow) * step) / steps);
+    feed(stdin, sgr(button | MOTION, col, row, true));
+  }
+  feed(stdin, sgr(button, toCol, toRow, false));
+}

@@ -12,9 +12,9 @@
  * child only replies with frames and state snapshots.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,7 +33,8 @@ import {
   type PickerItem,
   type PickerSource,
 } from '../src/tui/picker.js';
-import { VERBS, VERB_LIST, type FieldKind } from '../src/tui/verbs.js';
+import { clampSidebarWidth, MAIN_MIN_WIDTH, SIDEBAR_MIN_WIDTH } from '../src/tui/sidebar.js';
+import { INTERNAL_METHODS, VERBS, VERB_LIST, type FieldKind } from '../src/tui/verbs.js';
 import { useTempHome } from './helpers.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -227,6 +228,12 @@ beforeAll(async () => {
   await startDaemon();
 }, 30_000);
 
+// Before, not after: a harness flushes its last UI write while it is shutting
+// down, so a clean-up that ran on the way out could be overtaken by it.
+beforeEach(() => {
+  rmSync(join(home.root, 'state', 'tui-daemon-ui.json'), { force: true });
+});
+
 afterEach(async () => {
   while (harnesses.length > 0) await harnesses.pop()?.stop();
 });
@@ -303,8 +310,11 @@ describe('ansi pass-through', () => {
 });
 
 describe('command palette coverage', () => {
-  it('has an entry for every method the protocol declares', () => {
-    expect(new Set(VERB_LIST.map((verb) => verb.method))).toEqual(new Set(Object.values(METHODS)));
+  it('has an entry for every method the protocol declares, bar the internal ones', () => {
+    const internal: readonly string[] = INTERNAL_METHODS;
+    const listed = Object.values(METHODS).filter((method) => !internal.includes(method));
+    const offered: string[] = VERB_LIST.map((verb) => verb.method);
+    expect(new Set(offered)).toEqual(new Set(listed));
   });
 
   it('never lists a verb that is not a real method', () => {
@@ -602,6 +612,69 @@ describe('mouse hit-testing', () => {
   }, 30_000);
 });
 
+describe('sidebar resizing', () => {
+  it('clamps a width to the terminal it has to fit in', () => {
+    expect(clampSidebarWidth(SIDEBAR_WIDTH, 120)).toBe(SIDEBAR_WIDTH);
+    expect(clampSidebarWidth(4, 120)).toBe(SIDEBAR_MIN_WIDTH);
+    expect(clampSidebarWidth(300, 120)).toBe(120 - MAIN_MIN_WIDTH);
+    expect(clampSidebarWidth(60, 200)).toBe(60);
+  });
+
+  it('widens the sidebar when its right border is dragged', async () => {
+    const tui = await boot();
+    expect(tui.snapshot().sidebarWidth).toBe(SIDEBAR_WIDTH);
+
+    const at = rowOf(tui.frame(), 'targets');
+    await tui.send({
+      op: 'drag',
+      fromCol: SIDEBAR_WIDTH,
+      fromRow: at + 2,
+      toCol: SIDEBAR_WIDTH + 12,
+      toRow: at + 2,
+    });
+
+    expect(tui.snapshot().sidebarWidth).toBe(SIDEBAR_WIDTH + 12);
+    expect(tui.frame()[at - 1]?.indexOf('┐')).toBe(SIDEBAR_WIDTH + 11);
+  }, 30_000);
+
+  it('will not let the drag squeeze the log pane away', async () => {
+    const tui = await boot();
+    await tui.send({ op: 'drag', fromCol: SIDEBAR_WIDTH, fromRow: 4, toCol: WIDTH, toRow: 4 });
+    expect(tui.snapshot().sidebarWidth).toBe(WIDTH - MAIN_MIN_WIDTH);
+  }, 30_000);
+
+  it('only resizes from the border: a drag across a row leaves the width alone', async () => {
+    const tui = await boot();
+    const at = rowOf(tui.frame(), ROWS[1]!.name, SIDE);
+    await tui.send({ op: 'drag', fromCol: 5, fromRow: at, toCol: 24, toRow: at });
+    expect(tui.snapshot().sidebarWidth).toBe(SIDEBAR_WIDTH);
+  }, 30_000);
+
+  it('remembers the width and the folded groups across a restart', async () => {
+    const first = await boot();
+    const targetsRow = rowOf(first.frame(), 'targets');
+    await first.send({
+      op: 'drag',
+      fromCol: SIDEBAR_WIDTH,
+      fromRow: targetsRow + 2,
+      toCol: 44,
+      toRow: targetsRow + 2,
+    });
+    const billing = rowOf(first.frame(), 'BILLING', SIDE);
+    await first.send({ op: 'click', col: 3, row: billing });
+
+    expect(first.snapshot().sidebarWidth).toBe(44);
+    expect(first.snapshot().collapsed).toEqual(['/projects/billing']);
+    await first.send({ op: 'settle', ms: 300 });
+    await first.stop();
+
+    const second = await boot();
+    expect(second.snapshot().sidebarWidth).toBe(44);
+    expect(second.snapshot().collapsed).toEqual(['/projects/billing']);
+    expect(second.snapshot().slugs).not.toContain('billing/main:dev');
+  }, 40_000);
+});
+
 describe('pane header', () => {
   it('keeps the tail of a path that does not fit', () => {
     expect(elideStart('/projects/orders', 40)).toBe('/projects/orders');
@@ -774,7 +847,10 @@ describe('command palette', () => {
     await tui.send({ op: 'keys', keys: [':'] });
     const snapshot = tui.snapshot();
     expect(snapshot.mode).toBe('palette');
-    expect(new Set(snapshot.paletteMethods)).toEqual(new Set(Object.values(METHODS)));
+    const internal: readonly string[] = INTERNAL_METHODS;
+    expect(new Set(snapshot.paletteMethods)).toEqual(
+      new Set(Object.values(METHODS).filter((method) => !internal.includes(method))),
+    );
   }, 30_000);
 
   it('filters as you type and runs the picked verb through the daemon', async () => {
