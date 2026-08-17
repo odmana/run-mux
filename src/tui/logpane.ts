@@ -166,6 +166,8 @@ export function LogPane(props: LogPaneProps): ReactElement {
     rows.push(text({ key: 'empty', style: { fg: UI.muted } }, props.empty));
   }
 
+  // Deliberately unclipped: a clipped box loses the hit cell of its last row, so
+  // `overflow` lives on the main column instead — see `app.ts`.
   return box(
     {
       id: 'log-pane',
@@ -174,7 +176,6 @@ export function LogPane(props: LogPaneProps): ReactElement {
         flexDirection: 'column',
         border: true,
         borderColor: UI.border,
-        overflow: 'hidden',
       },
       onMouseScroll: (event) => {
         const scroll = event.scroll;

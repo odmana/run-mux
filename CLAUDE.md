@@ -45,6 +45,10 @@ test/fixtures/     mock commands — tests never invoke real apps
   include `j`/`k`, so each selection move would scroll it too. For the same reason the sidebar's
   glyphs are `selectable: false` — a press on selectable text starts a text selection and the
   drag events never reach the reorder handlers.
+- **The main column clips; the log pane must not.** OpenTUI's hit grid drops the bottom row of
+  any box with `overflow: hidden`, so a clipping log pane leaves its newest line unclickable and
+  impossible to start a drag-selection on. The clip belongs on the column around it, where the row
+  it costs is the footer. `y` yanks a live selection ahead of the buffer, so that row matters.
 - **One binary, three roles.** `rmux <verb>` is the CLI, `rmux __daemon` the daemon, `rmux __tui`
   the TUI. A compiled executable has no scripts on disk, so the CLI re-execs *itself* with a role
   argument rather than resolving an entry path. Never reintroduce a path-based lookup:

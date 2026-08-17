@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 
 import { METHODS, type TargetView } from '../protocol.js';
 import { stripAnsi } from './ansi.js';
-import { copyToClipboard } from './clipboard.js';
+import { copyToClipboard, selectedText } from './clipboard.js';
 import {
   useLogStream,
   usePickerCache,
@@ -471,13 +471,20 @@ export function App(props: AppProps): ReactElement {
     [call],
   );
 
+  // A highlighted range is the narrower instruction, so `y` honours it and only
+  // falls back to the whole visible buffer when nothing is selected. The
+  // selection is left standing: it stays on screen as the record of what a
+  // second `y` would copy.
   const doCopy = useCallback(() => {
-    const text = logs
-      .snapshot()
-      .map((line) => `[${line.label}] ${stripAnsi(line.text)}`)
-      .join('\n');
+    const picked = selectedText(renderer);
+    const text =
+      picked ??
+      logs
+        .snapshot()
+        .map((line) => `[${line.label}] ${stripAnsi(line.text)}`)
+        .join('\n');
     setCopied(text);
-    setStatus(`copied ${logs.visible.length} lines`);
+    setStatus(picked === null ? `copied ${logs.visible.length} lines` : 'copied selection');
     if (props.copy !== undefined) void props.copy(text);
     else void copyToClipboard(text, renderer);
   }, [logs, props, renderer]);
@@ -952,7 +959,10 @@ export function App(props: AppProps): ReactElement {
         onPickerScroll: movePicker,
       })
     : LogPane({
-        lines: logs.visible,
+        // A shrink re-windows in an effect, so for one frame the stream can still
+        // hold more rows than the pane is tall. Keeping the newest is what the
+        // next frame shows anyway.
+        lines: logs.visible.length > logHeight ? logs.visible.slice(-logHeight) : logs.visible,
         labels,
         width: mainWidth,
         empty:
@@ -1041,8 +1051,13 @@ export function App(props: AppProps): ReactElement {
       onRelease,
       onHover: setHovered,
     }),
+    // The only clip in the main column, and it is here rather than on the pane
+    // itself: OpenTUI's hit grid loses the bottom row of whatever box clips, so
+    // a clipping log pane leaves its newest line unclickable and impossible to
+    // start a drag-selection on. Clipping the column spends that row on the
+    // footer, which nothing ever hit-tests.
     box(
-      { key: 'main', style: { flexGrow: 1, flexDirection: 'column' } },
+      { key: 'main', style: { flexGrow: 1, flexDirection: 'column', overflow: 'hidden' } },
       Header({ target: current, now, width: mainWidth }),
       ...(inPalette ? [] : [chipsRow]),
       pane,

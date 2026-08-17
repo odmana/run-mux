@@ -15,6 +15,25 @@ export interface ClipboardSink {
   copyToClipboardOSC52(text: string): boolean;
 }
 
+export interface SelectionSource {
+  getSelection(): { getSelectedText(): string } | null;
+}
+
+/**
+ * What the user has highlighted, or null when that is nothing. A click with no
+ * drag still leaves a selection object behind, so the emptiness test has to be
+ * on the text rather than on `renderer.hasSelection`.
+ */
+export function selectedText(source: SelectionSource | undefined): string | null {
+  let text: string;
+  try {
+    text = source?.getSelection()?.getSelectedText() ?? '';
+  } catch {
+    return null;
+  }
+  return text.trim() === '' ? null : text;
+}
+
 function hostCommand(): { command: string; args: string[] } | null {
   switch (platform()) {
     case 'win32':

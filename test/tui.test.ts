@@ -1327,6 +1327,37 @@ describe('keys', () => {
     expect(copied).not.toContain('\u001b[');
   }, 30_000);
 
+  it('y copies only the highlighted text when a selection is live', async () => {
+    const tui = await boot();
+    await tui.send({ op: 'settle', ms: 200 });
+    const row = rowOf(tui.frame(), 'Now listening', MAIN);
+    const from = colOf(tui.frame(), row, 'Now listening');
+    await tui.send({ op: 'drag', fromCol: from, fromRow: row, toCol: from + 13, toRow: row });
+    await tui.send({ op: 'keys', keys: ['y'] });
+    const copied = tui.snapshot().copied ?? '';
+    expect(copied).toContain('Now listening');
+    expect(copied).not.toContain('[API]');
+    expect(copied).not.toContain('vite: port taken');
+    expect(tui.snapshot().status).toBe('copied selection');
+  }, 30_000);
+
+  it('starts a selection on the pane’s bottom row, not just the rows above it', async () => {
+    const tui = await boot();
+    await tui.send({ op: 'request', method: 'test.flood', params: { lines: 200 } });
+    await tui.send({ op: 'settle', ms: 400 });
+    const frame = tui.frame();
+    // The row above the log box's bottom border: the one a clipped pane loses.
+    const last = rowOf(frame, '└', MAIN) - 1;
+    const newest = /flood \d+/.exec(frame[last - 1] ?? '')?.[0] ?? '';
+    expect(newest).not.toBe('');
+
+    const from = colOf(frame, last, 'flood');
+    await tui.send({ op: 'drag', fromCol: from, fromRow: last, toCol: WIDTH - 2, toRow: last });
+    await tui.send({ op: 'keys', keys: ['y'] });
+    expect(tui.snapshot().copied).toBe(newest);
+    expect(tui.snapshot().status).toBe('copied selection');
+  }, 60_000);
+
   it('R offers a per-command restart picker', async () => {
     const tui = await boot();
     await tui.send({ op: 'keys', keys: ['R'] });
