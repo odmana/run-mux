@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { METHODS } from '../src/protocol.js';
 import { ansiToChunks, stripAnsi } from '../src/tui/ansi.js';
 import type { AppSnapshot, PickerSnapshot } from '../src/tui/app.js';
+import { elideStart } from '../src/tui/format.js';
 import { fuzzyMatch, fuzzyRank } from '../src/tui/fuzzy.js';
 import { ALL, LogBuffer } from '../src/tui/log-buffer.js';
 import {
@@ -598,6 +599,35 @@ describe('mouse hit-testing', () => {
           (entry.params as { target?: string } | null)?.target === row.slug,
       ),
     ).toBe(true);
+  }, 30_000);
+});
+
+describe('pane header', () => {
+  it('keeps the tail of a path that does not fit', () => {
+    expect(elideStart('/projects/orders', 40)).toBe('/projects/orders');
+    expect(elideStart('/projects/orders-feat-ports', 12)).toBe('…-feat-ports');
+    expect(elideStart('/projects/orders', 1)).toBe('…');
+    expect(elideStart('/projects/orders', 0)).toBe('');
+  });
+
+  it('shows the checkout path under the identity line, above the chips', async () => {
+    const tui = await boot();
+    const identity = rowOf(tui.frame(), 'orders/main:run-orders', MAIN);
+    const path = rowOf(tui.frame(), '/projects/orders', MAIN);
+    const chips = rowOf(tui.frame(), ' a all ', MAIN);
+
+    expect(path).toBe(identity + 1);
+    expect(chips).toBe(path + 1);
+  }, 30_000);
+
+  it('follows the selection onto a linked worktree', async () => {
+    const tui = await boot();
+    const at = rowOf(tui.frame(), 'ports', SIDE);
+    await tui.send({ op: 'click', col: 5, row: at });
+    await tui.send({ op: 'settle', ms: 200 });
+
+    const identity = rowOf(tui.frame(), 'orders/feat-ports:run-orders', MAIN);
+    expect(tui.frame()[identity]).toContain('/projects/orders-feat-ports');
   }, 30_000);
 });
 

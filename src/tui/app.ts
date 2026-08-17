@@ -18,7 +18,15 @@ import { useLogStream, usePickerCache, useRunStatus, useTargets, type DaemonLink
 import { box } from './elements.js';
 import { fit } from './format.js';
 import type { LogFilter, LogLine } from './log-buffer.js';
-import { ALL_CHIP, Chips, Footer, Header, LogPane } from './logpane.js';
+import {
+  ALL_CHIP,
+  Chips,
+  CHROME_HEIGHT,
+  Footer,
+  Header,
+  HEADER_HEIGHT,
+  LogPane,
+} from './logpane.js';
 import { Palette, type PaletteForm } from './palette.js';
 import {
   applyFieldValue,
@@ -205,8 +213,7 @@ export function App(props: AppProps): ReactElement {
   }, [picker, form, source]);
 
   const mainWidth = Math.max(10, dimensions.width - SIDEBAR_WIDTH);
-  // header + chips + footer + the log box's own two border rows.
-  const logHeight = Math.max(1, dimensions.height - 5);
+  const logHeight = Math.max(1, dimensions.height - CHROME_HEIGHT);
 
   const filter = useMemo<LogFilter>(
     () => ({ labels: filterLabels, search }),
@@ -781,7 +788,7 @@ export function App(props: AppProps): ReactElement {
         picker: pickerView,
         status,
         width: mainWidth,
-        height: dimensions.height - 2,
+        height: dimensions.height - HEADER_HEIGHT - 1,
         onPick: (index) => {
           setPaletteIndex(index);
           const verb = verbs[index];
@@ -846,7 +853,7 @@ export function App(props: AppProps): ReactElement {
     }),
     box(
       { key: 'main', style: { flexGrow: 1, flexDirection: 'column' } },
-      Header({ target: current, now }),
+      Header({ target: current, now, width: mainWidth }),
       ...(inPalette ? [] : [chipsRow]),
       pane,
       Footer({ hint: hintLine, width: mainWidth }),

@@ -7,7 +7,7 @@ import type { TargetView } from '../protocol.js';
 import type { CommandState } from '../types.js';
 import { ansiToChunks } from './ansi.js';
 import { box, text } from './elements.js';
-import { elapsedSince, fit } from './format.js';
+import { elapsedSince, elideStart, fit } from './format.js';
 import type { LogLine } from './log-buffer.js';
 import {
   COMMAND_COLOUR,
@@ -20,26 +20,54 @@ import {
 
 export const ALL_CHIP = 'all';
 
-export function Header({ target, now }: { target: TargetView | null; now: number }): ReactElement {
-  if (target === null) {
-    return box(
-      { id: 'header', style: { height: 1, flexShrink: 0, backgroundColor: UI.panel } },
-      text({ style: { fg: UI.muted } }, ' run-mux — no target selected '),
-    );
-  }
-  const stale = target.staleDefinition === true ? '  ⚠ stale definition' : '';
+/** Identity line, then the checkout path. */
+export const HEADER_HEIGHT = 2;
+
+/** Everything the log pane is not: the header, the chips, the log box's own border rows, the footer. */
+export const CHROME_HEIGHT = HEADER_HEIGHT + 1 + 2 + 1;
+
+export interface HeaderProps {
+  target: TargetView | null;
+  now: number;
+  width: number;
+}
+
+export function Header({ target, now, width }: HeaderProps): ReactElement {
+  const identity =
+    target === null
+      ? text({ key: 'line1', style: { height: 1, fg: UI.muted } }, ' run-mux — no target selected ')
+      : box(
+          { key: 'line1', style: { height: 1, flexShrink: 0, flexDirection: 'row' } },
+          text({ key: 'slug', style: { fg: UI.text } }, ` ${target.slug} `),
+          text(
+            { key: 'branch', style: { fg: UI.muted } },
+            ` ${target.branch}  slot ${target.slot}  `,
+          ),
+          text(
+            { key: 'dot', style: { fg: TARGET_COLOUR[target.status] } },
+            TARGET_DOT[target.status],
+          ),
+          text({ key: 'status', style: { fg: TARGET_COLOUR[target.status] } }, ` ${target.status}`),
+          text(
+            { key: 'elapsed', style: { fg: UI.muted } },
+            `  ${elapsedSince(target.startedAt, now)}${target.staleDefinition === true ? '  ⚠ stale definition' : ''}`,
+          ),
+        );
+
   return box(
     {
       id: 'header',
-      style: { height: 1, flexShrink: 0, flexDirection: 'row', backgroundColor: UI.panel },
+      style: {
+        height: HEADER_HEIGHT,
+        flexShrink: 0,
+        flexDirection: 'column',
+        backgroundColor: UI.panel,
+      },
     },
-    text({ key: 'slug', style: { fg: UI.text } }, ` ${target.slug} `),
-    text({ key: 'branch', style: { fg: UI.muted } }, ` ${target.branch}  slot ${target.slot}  `),
-    text({ key: 'dot', style: { fg: TARGET_COLOUR[target.status] } }, TARGET_DOT[target.status]),
-    text({ key: 'status', style: { fg: TARGET_COLOUR[target.status] } }, ` ${target.status}`),
+    identity,
     text(
-      { key: 'elapsed', style: { fg: UI.muted } },
-      `  ${elapsedSince(target.startedAt, now)}${stale}`,
+      { key: 'path', id: 'header-path', style: { height: 1, fg: UI.muted } },
+      target === null ? '' : ` ${elideStart(target.checkoutPath, Math.max(1, width - 2))}`,
     ),
   );
 }
