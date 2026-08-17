@@ -35,6 +35,16 @@ test/fixtures/     mock commands — tests never invoke real apps
   or retyped. No colour, no spinners under `--json`.
 - **Processes are daemon-scoped.** Never re-adopt a process the daemon did not spawn — you cannot
   attach to its stdout, so it would run with a permanent hole in its logs.
+- **TUI view state goes through the daemon.** Sidebar width, folded groups and the
+  sidebar's display order live in `state.ui`, written through `ui.get` / `ui.set`. The TUI is a
+  second process and `saveState` rewrites the whole file, so a direct write would land on top of
+  whatever the supervisor recorded in between. The order is a *view* layer, never a permutation of
+  `state.targets`: `rmux ls` and `--json` answer in registration order and must keep doing so.
+- **The renderer runs with `autoFocus: false`.** Every key goes through the one handler in
+  `app.ts`. Turn it back on and a click focuses the sidebar's scroll box, whose own bindings
+  include `j`/`k`, so each selection move would scroll it too. For the same reason the sidebar's
+  glyphs are `selectable: false` — a press on selectable text starts a text selection and the
+  drag events never reach the reorder handlers.
 - **One binary, three roles.** `rmux <verb>` is the CLI, `rmux __daemon` the daemon, `rmux __tui`
   the TUI. A compiled executable has no scripts on disk, so the CLI re-execs *itself* with a role
   argument rather than resolving an entry path. Never reintroduce a path-based lookup:

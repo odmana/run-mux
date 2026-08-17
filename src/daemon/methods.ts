@@ -657,14 +657,30 @@ function optionalStringArray(params: unknown, key: string): string[] | undefined
   return value as string[];
 }
 
+function optionalStringArrayMap(
+  params: unknown,
+  key: string,
+): Record<string, string[]> | undefined {
+  const value = isRecord(params) ? params[key] : undefined;
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw rpcError('bad_params', `"${key}" must be an object`);
+  const map: Record<string, string[]> = {};
+  for (const entry of Object.keys(value)) map[entry] = optionalStringArray(value, entry) ?? [];
+  return map;
+}
+
 /** Unknown keys are dropped rather than stored, so a newer TUI cannot smuggle junk into state. */
 function uiPatch(params: unknown): UiState {
   const ui = isRecord(params) ? params.ui : undefined;
   const patch: UiState = {};
   const sidebarWidth = optionalNumber(ui, 'sidebarWidth');
   const collapsedRepos = optionalStringArray(ui, 'collapsedRepos');
+  const repoOrder = optionalStringArray(ui, 'repoOrder');
+  const targetOrder = optionalStringArrayMap(ui, 'targetOrder');
   if (sidebarWidth !== undefined) patch.sidebarWidth = Math.max(0, Math.round(sidebarWidth));
   if (collapsedRepos !== undefined) patch.collapsedRepos = collapsedRepos;
+  if (repoOrder !== undefined) patch.repoOrder = repoOrder;
+  if (targetOrder !== undefined) patch.targetOrder = targetOrder;
   return patch;
 }
 

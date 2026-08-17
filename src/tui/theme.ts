@@ -8,6 +8,7 @@ export const UI = {
   borderFocus: '#5e81ac',
   selection: '#2e3a4a',
   hover: '#28303c',
+  drag: '#3a4a63',
   text: '#d8dee9',
   muted: '#7b8494',
   accent: '#88c0d0',

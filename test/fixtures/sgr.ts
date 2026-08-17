@@ -53,18 +53,20 @@ export function move(stdin: StdinLike, col: number, row: number) {
 const MOTION = 32;
 
 /**
- * Press, several motion reports, release — the intermediate frames matter,
- * because OpenTUI decides what a drag has captured on the first one.
+ * Press, a motion report per cell crossed, release. One report per cell is what
+ * a terminal actually sends, and it matters: OpenTUI decides what a drag has
+ * captured on the first motion report, so a helper that teleported would test a
+ * path no real pointer takes.
  */
 export function drag(
   stdin: StdinLike,
   from: [col: number, row: number],
   to: [col: number, row: number],
   button: number = BTN.LEFT,
-  steps = 4,
 ) {
   const [fromCol, fromRow] = from;
   const [toCol, toRow] = to;
+  const steps = Math.max(1, Math.abs(toCol - fromCol), Math.abs(toRow - fromRow));
   feed(stdin, sgr(button, fromCol, fromRow, true));
   for (let step = 1; step <= steps; step++) {
     const col = Math.round(fromCol + ((toCol - fromCol) * step) / steps);

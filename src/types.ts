@@ -101,6 +101,10 @@ export interface ChildRecord {
 export interface UiState {
   sidebarWidth?: number;
   collapsedRepos?: string[];
+  /** Repo paths in sidebar order. Anything absent follows, in the daemon's order. */
+  repoOrder?: string[];
+  /** repoPath -> target slugs in sidebar order, same rule for anything absent. */
+  targetOrder?: Record<string, string[]>;
 }
 
 export interface AppState {

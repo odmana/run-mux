@@ -27,6 +27,8 @@ export const ChildRecordSchema = v.object({
 export const UiStateSchema = v.object({
   sidebarWidth: v.optional(v.number()),
   collapsedRepos: v.optional(v.array(v.string())),
+  repoOrder: v.optional(v.array(v.string())),
+  targetOrder: v.optional(v.record(v.string(), v.array(v.string()))),
 });
 
 export const AppStateSchema = v.object({

@@ -42,6 +42,10 @@ export async function runTui(): Promise<void> {
     exitOnCtrlC: false,
     useMouse: true,
     targetFps: 30,
+    // Nothing here takes focus — every key goes through the one handler in
+    // `app.ts`. Left on, a click would focus the sidebar's scroll box, whose own
+    // key bindings include j/k, and every selection move would also scroll it.
+    autoFocus: false,
   });
 
   let stopping = false;

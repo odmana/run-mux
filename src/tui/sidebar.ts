@@ -1,10 +1,13 @@
-/** The 32-column target list: repo headers, one row per target. */
+/** The target list: repo headers, one row per target, scrollable and reorderable. */
 
-import type { ReactElement } from 'react';
+import type { ScrollBoxRenderable } from '@opentui/core';
+import type { TextProps } from '@opentui/react';
+import type { ReactElement, Ref } from 'react';
 
 import type { TargetView } from '../protocol.js';
-import { box, text } from './elements.js';
+import { box, scrollbox, text } from './elements.js';
 import { elapsedSince, fit, padTo, shortName } from './format.js';
+import { sortByOrder, type SidebarOrder } from './order.js';
 import { TARGET_COLOUR, TARGET_DOT, UI } from './theme.js';
 
 export const SIDEBAR_WIDTH = 32;
@@ -18,14 +21,48 @@ export function clampSidebarWidth(width: number, terminalWidth: number): number 
   return Math.min(max, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
+const REPO_ID = 'repo-';
+const TARGET_ID = 'target-';
+
+export function targetElementId(slug: string): string {
+  return `${TARGET_ID}${slug}`;
+}
+
+/**
+ * What a drag picked up, and what it was dropped on.
+ *
+ * What was picked up is recorded at mouse-down rather than read off the drop
+ * event's `source`. OpenTUI captures on the first *motion* report, which is
+ * already a cell away from the press — enough to be the next row — so the
+ * capture is not a reliable answer to "what is being dragged".
+ */
+export type DragHandle = { kind: 'repo'; key: string } | { kind: 'target'; key: string };
+
+function sameHandle(a: DragHandle | null, b: DragHandle): boolean {
+  return a !== null && a.kind === b.kind && a.key === b.key;
+}
+
+/**
+ * Every glyph in the sidebar opts out of OpenTUI's text selection. A left press
+ * on selectable text starts a selection, and the drag events then go to the
+ * selection instead of the reorder handlers. Selection still works in the log
+ * pane, which is the only place anyone wants to sweep text with the mouse.
+ */
+function label(props: TextProps, content: string): ReactElement {
+  return text({ ...props, selectable: false }, content);
+}
+
 export interface RepoGroup {
   repoPath: string;
   repoName: string;
   targets: TargetView[];
 }
 
-/** Repos in first-seen order, targets in the order the daemon reported them. */
-export function groupTargets(targets: readonly TargetView[]): RepoGroup[] {
+/**
+ * Repos and targets in the user's order where they have one, otherwise
+ * first-seen and daemon order respectively.
+ */
+export function groupTargets(targets: readonly TargetView[], order?: SidebarOrder): RepoGroup[] {
   const groups = new Map<string, RepoGroup>();
   for (const target of targets) {
     let group = groups.get(target.repoPath);
@@ -35,7 +72,16 @@ export function groupTargets(targets: readonly TargetView[]): RepoGroup[] {
     }
     group.targets.push(target);
   }
-  return [...groups.values()];
+  if (order === undefined) return [...groups.values()];
+
+  const ordered = sortByOrder([...groups.values()], (group) => group.repoPath, order.repos);
+  for (const group of ordered) {
+    const within = order.targets[group.repoPath];
+    if (within !== undefined) {
+      group.targets = sortByOrder(group.targets, (target) => target.slug, within);
+    }
+  }
+  return ordered;
 }
 
 /** The rows a keyboard selection walks: collapsed groups hide their targets. */
@@ -51,7 +97,20 @@ export function visibleSlugs(
   return slugs;
 }
 
-export type RowAction = 'toggle' | 'restart';
+/**
+ * Something the sidebar can be clicked to do. Reported as a press and a release
+ * rather than acted on at mouse-down, because every one of these hit areas is
+ * also somewhere a drag can start, and a drag must not fold a group or stop a
+ * target on its way past.
+ */
+export type SidebarClick =
+  | { kind: 'fold'; key: string }
+  | { kind: 'toggle'; key: string }
+  | { kind: 'restart'; key: string };
+
+export function sameClick(a: SidebarClick | null, b: SidebarClick): boolean {
+  return a !== null && a.kind === b.kind && a.key === b.key;
+}
 
 export interface SidebarProps {
   groups: readonly RepoGroup[];
@@ -62,13 +121,18 @@ export interface SidebarProps {
   width?: number;
   /** The right border doubles as the resize grip, and says so by lighting up. */
   edgeLit: boolean;
+  dragging: DragHandle | null;
+  boxRef?: Ref<ScrollBoxRenderable>;
   onSelect: (slug: string, x: number, y: number) => void;
   onContext: (slug: string) => void;
-  onAction: (slug: string, action: RowAction) => void;
-  onToggleGroup: (repoPath: string) => void;
+  onPress: (click: SidebarClick) => void;
+  onRelease: (click: SidebarClick) => void;
   onHover: (slug: string | null) => void;
   onEdge: (overEdge: boolean) => void;
   onResizeStart: () => void;
+  /** Pressed, and therefore what a drag from here would carry. */
+  onGrab: (handle: DragHandle) => void;
+  onDrop: (onto: DragHandle) => void;
 }
 
 interface Columns {
@@ -94,16 +158,31 @@ function columns(width: number): Columns {
   return { name, branch, slot, elapsed };
 }
 
-function header(group: RepoGroup, collapsed: boolean, width: number, onToggle: () => void) {
+function header(props: SidebarProps, group: RepoGroup, width: number): ReactElement {
+  const collapsed = props.collapsed.has(group.repoPath);
+  const self: DragHandle = { kind: 'repo', key: group.repoPath };
+  const fold: SidebarClick = { kind: 'fold', key: group.repoPath };
+  const dragged = sameHandle(props.dragging, self);
+
   return box(
     {
       key: `repo-${group.repoPath}`,
-      id: `repo-${group.repoPath}`,
-      style: { height: 1, flexDirection: 'row', flexShrink: 0 },
-      onMouseDown: onToggle,
+      id: `${REPO_ID}${group.repoPath}`,
+      style: {
+        height: 1,
+        flexDirection: 'row',
+        flexShrink: 0,
+        backgroundColor: dragged ? UI.drag : undefined,
+      },
+      onMouseDown: () => {
+        props.onPress(fold);
+        props.onGrab(self);
+      },
+      onMouseUp: () => props.onRelease(fold),
+      onMouseDrop: () => props.onDrop(self),
     },
-    text(
-      { style: { fg: UI.muted } },
+    label(
+      { style: { fg: dragged ? UI.accent : UI.muted } },
       `${collapsed ? '▸' : '▾'} ${fit(group.repoName.toUpperCase(), Math.max(4, width - 5))}`,
     ),
   );
@@ -115,61 +194,84 @@ function row(props: SidebarProps, target: TargetView, cols: Columns): ReactEleme
   const running =
     target.status === 'running' || target.status === 'starting' || target.status === 'degraded';
 
-  const background = selected ? UI.selection : hovered ? UI.hover : undefined;
+  const self: DragHandle = { kind: 'target', key: target.slug };
+  const toggle: SidebarClick = { kind: 'toggle', key: target.slug };
+  const restart: SidebarClick = { kind: 'restart', key: target.slug };
+  const dragged = sameHandle(props.dragging, self);
+  // The pointer is over this row while something else is being dragged, so this
+  // is where it would land.
+  const landing = props.dragging !== null && hovered && !dragged;
+
+  const background = dragged
+    ? UI.drag
+    : landing
+      ? UI.selection
+      : selected
+        ? UI.selection
+        : hovered
+          ? UI.hover
+          : undefined;
 
   const nameLine = box(
     { key: 'line1', style: { height: 1, flexDirection: 'row', flexShrink: 0 } },
-    text(
+    label(
       {
         key: 'dot',
         style: { fg: TARGET_COLOUR[target.status] },
+        // Left to bubble: the row below arms the drag and moves the selection,
+        // and a right-click is the row's context menu, not a start/stop.
         onMouseDown: (event) => {
-          event.stopPropagation();
-          props.onSelect(target.slug, event.x, event.y);
-          props.onAction(target.slug, 'toggle');
+          if (event.button !== 2) props.onPress(toggle);
         },
+        onMouseUp: () => props.onRelease(toggle),
       },
       ` ${TARGET_DOT[target.status]} `,
     ),
-    text(
+    label(
       { key: 'name', style: { fg: UI.text, flexShrink: 1 } },
       padTo(fit(shortName(target.slug, target.alias), cols.name), cols.name),
     ),
   );
 
-  const detail: ReactElement[] = [text({ key: 'indent', style: { fg: UI.muted } }, '   ')];
+  const detail: ReactElement[] = [
+    label(
+      { key: 'indent', style: { fg: landing ? UI.accent : UI.muted } },
+      landing ? ' ▸ ' : '   ',
+    ),
+  ];
 
-  if (hovered) {
-    // Per-row controls appear under the pointer, taking the branch column's
-    // space on the detail line rather than eating into the name above.
+  // Per-row controls appear under the pointer, taking the branch column's space
+  // on the detail line rather than eating into the name above. Not mid-drag:
+  // the pointer is carrying a row, not reaching for a button.
+  if (hovered && props.dragging === null) {
     detail.push(
-      text(
+      label(
         {
           key: 'run',
           style: { fg: running ? UI.danger : UI.ok },
           onMouseDown: (event) => {
-            event.stopPropagation();
-            props.onAction(target.slug, 'toggle');
+            if (event.button !== 2) props.onPress(toggle);
           },
+          onMouseUp: () => props.onRelease(toggle),
         },
         running ? '■' : '▶',
       ),
-      text(
+      label(
         {
           key: 'restart',
           style: { fg: UI.accent },
           onMouseDown: (event) => {
-            event.stopPropagation();
-            props.onAction(target.slug, 'restart');
+            if (event.button !== 2) props.onPress(restart);
           },
+          onMouseUp: () => props.onRelease(restart),
         },
         ' ↻',
       ),
-      text({ key: 'pad', style: { fg: UI.muted } }, ' '.repeat(Math.max(0, cols.branch - 3))),
+      label({ key: 'pad', style: { fg: UI.muted } }, ' '.repeat(Math.max(0, cols.branch - 3))),
     );
   } else {
     detail.push(
-      text(
+      label(
         { key: 'branch', style: { fg: UI.muted } },
         padTo(fit(target.branch, cols.branch), cols.branch),
       ),
@@ -177,8 +279,8 @@ function row(props: SidebarProps, target: TargetView, cols: Columns): ReactEleme
   }
 
   detail.push(
-    text({ key: 'slot', style: { fg: UI.muted } }, padTo(`slot ${target.slot}`, cols.slot)),
-    text(
+    label({ key: 'slot', style: { fg: UI.muted } }, padTo(`slot ${target.slot}`, cols.slot)),
+    label(
       { key: 'elapsed', style: { fg: UI.muted } },
       padTo(fit(elapsedSince(target.startedAt, props.now), cols.elapsed), cols.elapsed),
     ),
@@ -192,7 +294,7 @@ function row(props: SidebarProps, target: TargetView, cols: Columns): ReactEleme
   return box(
     {
       key: target.slug,
-      id: `target-${target.slug}`,
+      id: targetElementId(target.slug),
       style: {
         height: ROW_HEIGHT,
         flexDirection: 'column',
@@ -205,9 +307,11 @@ function row(props: SidebarProps, target: TargetView, cols: Columns): ReactEleme
           return;
         }
         props.onSelect(target.slug, event.x, event.y);
+        props.onGrab(self);
       },
       onMouseOver: () => props.onHover(target.slug),
       onMouseOut: () => props.onHover(null),
+      onMouseDrop: () => props.onDrop(self),
     },
     nameLine,
     detailLine,
@@ -220,15 +324,14 @@ export function Sidebar(props: SidebarProps): ReactElement {
   const children: ReactElement[] = [];
 
   for (const group of props.groups) {
-    const collapsed = props.collapsed.has(group.repoPath);
-    children.push(header(group, collapsed, width, () => props.onToggleGroup(group.repoPath)));
-    if (collapsed) continue;
+    children.push(header(props, group, width));
+    if (props.collapsed.has(group.repoPath)) continue;
     for (const target of group.targets) children.push(row(props, target, cols));
   }
 
   if (children.length === 0) {
     children.push(
-      text({ key: 'empty', style: { fg: UI.muted } }, ' no targets — `:` then "Add target"'),
+      label({ key: 'empty', style: { fg: UI.muted } }, ' no targets — `:` then "Add target"'),
     );
   }
 
@@ -236,14 +339,18 @@ export function Sidebar(props: SidebarProps): ReactElement {
   // Nothing is drawn there, which is what lets the box itself answer the press.
   const edge = width - 1;
 
-  return box(
+  return scrollbox(
     {
       id: 'sidebar',
       title: 'targets',
+      ref: props.boxRef,
+      scrollY: true,
+      stickyScroll: false,
+      viewportCulling: true,
+      contentOptions: { flexDirection: 'column' },
       style: {
         width,
         flexShrink: 0,
-        flexDirection: 'column',
         border: true,
         borderColor: props.edgeLit ? UI.accent : UI.border,
       },

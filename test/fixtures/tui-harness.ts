@@ -40,7 +40,6 @@ export type HarnessCommand =
       toCol: number;
       toRow: number;
       button?: number;
-      steps?: number;
     }
   | { id: number; op: 'keys'; keys: string[] }
   | { id: number; op: 'resize'; width: number; height: number }
@@ -90,7 +89,7 @@ const { renderer, flush, captureCharFrame, resize } = await testRender(
     retain: RETAIN,
     uiWriteMs: UI_WRITE_MS,
   }),
-  { width: WIDTH, height: HEIGHT, targetFps: 60 },
+  { width: WIDTH, height: HEIGHT, targetFps: 60, autoFocus: false },
 );
 
 const delay = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -138,7 +137,6 @@ async function run(command: HarnessCommand): Promise<unknown> {
         [command.fromCol, command.fromRow],
         [command.toCol, command.toRow],
         command.button ?? 0,
-        command.steps,
       );
       await settle();
       return undefined;

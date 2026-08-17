@@ -18,12 +18,13 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { METHODS } from '../src/protocol.js';
+import { METHODS, type TargetView } from '../src/protocol.js';
 import { ansiToChunks, stripAnsi } from '../src/tui/ansi.js';
 import type { AppSnapshot, PickerSnapshot } from '../src/tui/app.js';
 import { elideStart } from '../src/tui/format.js';
 import { fuzzyMatch, fuzzyRank } from '../src/tui/fuzzy.js';
 import { ALL, LogBuffer } from '../src/tui/log-buffer.js';
+import { moveInto, sortByOrder } from '../src/tui/order.js';
 import {
   applyFieldValue,
   buildItems,
@@ -33,7 +34,12 @@ import {
   type PickerItem,
   type PickerSource,
 } from '../src/tui/picker.js';
-import { clampSidebarWidth, MAIN_MIN_WIDTH, SIDEBAR_MIN_WIDTH } from '../src/tui/sidebar.js';
+import {
+  clampSidebarWidth,
+  groupTargets,
+  MAIN_MIN_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+} from '../src/tui/sidebar.js';
 import { INTERNAL_METHODS, VERBS, VERB_LIST, type FieldKind } from '../src/tui/verbs.js';
 import { useTempHome } from './helpers.js';
 
@@ -201,6 +207,8 @@ function colOf(frame: string[], row: number, needle: string): number {
   return at + 1;
 }
 
+const self = (value: string): string => value;
+
 /** Sidebar rows in draw order: the label to search for, and the slug it must select. */
 const ROWS: { name: string; slug: string }[] = [
   { name: 'main:run-ord', slug: 'orders/main:run-orders' },
@@ -232,6 +240,7 @@ beforeAll(async () => {
 // down, so a clean-up that ran on the way out could be overtaken by it.
 beforeEach(() => {
   rmSync(join(home.root, 'state', 'tui-daemon-ui.json'), { force: true });
+  rmSync(join(home.root, 'state', 'tui-daemon-targets.json'), { force: true });
 });
 
 afterEach(async () => {
@@ -610,6 +619,157 @@ describe('mouse hit-testing', () => {
       ),
     ).toBe(true);
   }, 30_000);
+});
+
+describe('sidebar scrolling', () => {
+  async function withBulkTargets(count: number): Promise<Harness> {
+    const tui = await boot();
+    await tui.send({ op: 'request', method: 'test.targets', params: { count } });
+    await tui.send({ op: 'settle', ms: 400 });
+    return tui;
+  }
+
+  it('scrolls the last row into view as the selection walks down to it', async () => {
+    const tui = await withBulkTargets(24);
+    const slugs = tui.snapshot().slugs;
+    const last = slugs.at(-1) ?? '';
+    expect(slugs).toHaveLength(30);
+    expect(last).toBe('studio/feat-y:web');
+    // Sixty-three rows of sidebar in a thirty-line terminal: the tail is below the fold.
+    expect(tui.frame().join('\n')).not.toContain('feat-y:web');
+
+    await tui.send({ op: 'keys', keys: Array.from({ length: slugs.length - 1 }, () => 'j') });
+    await tui.send({ op: 'settle', ms: 200 });
+
+    expect(tui.snapshot().selected).toBe(last);
+    expect(tui.frame().join('\n')).toContain('feat-y:web');
+  }, 40_000);
+
+  it('scrolls with the wheel over the sidebar, leaving the log pane alone', async () => {
+    const tui = await withBulkTargets(24);
+    const before = tui.frame().map((line) => line.slice(0, SIDEBAR_WIDTH));
+    const logBefore = tui.snapshot().scrollBack;
+
+    await tui.send({ op: 'wheel', col: 10, row: 8, dir: 'down', n: 6 });
+
+    const after = tui.frame().map((line) => line.slice(0, SIDEBAR_WIDTH));
+    expect(after).not.toEqual(before);
+    expect(tui.snapshot().scrollBack).toBe(logBefore);
+  }, 40_000);
+});
+
+describe('sidebar ordering', () => {
+  it('moves an item into the slot it was dropped on', () => {
+    expect(moveInto(['a', 'b', 'c', 'd'], 'a', 'c')).toEqual(['b', 'c', 'a', 'd']);
+    expect(moveInto(['a', 'b', 'c', 'd'], 'd', 'b')).toEqual(['a', 'd', 'b', 'c']);
+    expect(moveInto(['a', 'b', 'c'], 'a', 'a')).toEqual(['a', 'b', 'c']);
+    expect(moveInto(['a', 'b', 'c'], 'a', 'gone')).toEqual(['a', 'b', 'c']);
+  });
+
+  it('puts listed keys first and leaves the rest where the daemon had them', () => {
+    expect(sortByOrder(['a', 'b', 'c', 'd'], self, ['c', 'a'])).toEqual(['c', 'a', 'b', 'd']);
+    expect(sortByOrder(['a', 'b'], self, [])).toEqual(['a', 'b']);
+    expect(sortByOrder(['a', 'b'], self, ['gone', 'b'])).toEqual(['b', 'a']);
+  });
+
+  it('groups by repo and applies both levels of the order', () => {
+    const view = (slug: string, repoPath: string): TargetView =>
+      ({ slug, repoPath, repoName: repoPath.slice(1) }) as TargetView;
+    const targets = [view('a/1', '/a'), view('a/2', '/a'), view('b/1', '/b')];
+
+    expect(groupTargets(targets).map((group) => group.repoPath)).toEqual(['/a', '/b']);
+
+    const reordered = groupTargets(targets, {
+      repos: ['/b', '/a'],
+      targets: { '/a': ['a/2', 'a/1'] },
+    });
+    expect(reordered.map((group) => group.repoPath)).toEqual(['/b', '/a']);
+    expect(reordered[1]?.targets.map((target) => target.slug)).toEqual(['a/2', 'a/1']);
+  });
+
+  it('reorders targets within a repo when one is dragged onto another', async () => {
+    const tui = await boot();
+    expect(tui.snapshot().slugs.slice(0, 2)).toEqual([
+      'orders/main:run-orders',
+      'orders/feat-ports:run-orders',
+    ]);
+
+    const from = rowOf(tui.frame(), ROWS[0]!.name, SIDE);
+    const to = rowOf(tui.frame(), ROWS[1]!.name, SIDE);
+    await tui.send({ op: 'drag', fromCol: 12, fromRow: from, toCol: 12, toRow: to });
+
+    expect(tui.snapshot().slugs.slice(0, 2)).toEqual([
+      'orders/feat-ports:run-orders',
+      'orders/main:run-orders',
+    ]);
+  }, 30_000);
+
+  it('carries the whole group when a repo header is dragged', async () => {
+    const tui = await boot();
+    expect(tui.snapshot().slugs[0]).toBe('orders/main:run-orders');
+
+    const from = rowOf(tui.frame(), 'STUDIO', SIDE);
+    const to = rowOf(tui.frame(), 'ORDERS', SIDE);
+    await tui.send({ op: 'drag', fromCol: 6, fromRow: from, toCol: 6, toRow: to });
+
+    expect(tui.snapshot().slugs.slice(0, 2)).toEqual(['studio/main:web', 'studio/feat-y:web']);
+  }, 30_000);
+
+  it('refuses to drop a target into another repo', async () => {
+    const tui = await boot();
+    const before = tui.snapshot().slugs;
+
+    const from = rowOf(tui.frame(), ROWS[0]!.name, SIDE);
+    const to = rowOf(tui.frame(), ROWS[2]!.name, SIDE);
+    await tui.send({ op: 'drag', fromCol: 12, fromRow: from, toCol: 12, toRow: to });
+
+    expect(tui.snapshot().slugs).toEqual(before);
+  }, 30_000);
+
+  it('does not stop a target that was picked up by its status dot', async () => {
+    const tui = await boot();
+    const from = rowOf(tui.frame(), ROWS[0]!.name, SIDE);
+    const to = rowOf(tui.frame(), ROWS[1]!.name, SIDE);
+    const before = requestLog().length;
+
+    await tui.send({ op: 'drag', fromCol: 2, fromRow: from, toCol: 2, toRow: to });
+
+    const since = requestLog().slice(before);
+    expect(since.some((entry) => entry.method === METHODS.runStop)).toBe(false);
+    expect(since.some((entry) => entry.method === METHODS.runStart)).toBe(false);
+    expect(tui.snapshot().slugs[0]).toBe('orders/feat-ports:run-orders');
+  }, 30_000);
+
+  it('does not fold a repo group that was only dragged past', async () => {
+    const tui = await boot();
+    const from = rowOf(tui.frame(), 'STUDIO', SIDE);
+    const to = rowOf(tui.frame(), 'ORDERS', SIDE);
+    await tui.send({ op: 'drag', fromCol: 6, fromRow: from, toCol: 6, toRow: to });
+    expect(tui.snapshot().collapsed).toEqual([]);
+  }, 30_000);
+
+  it('remembers both orders across a restart', async () => {
+    const first = await boot();
+    const target = rowOf(first.frame(), ROWS[0]!.name, SIDE);
+    const onto = rowOf(first.frame(), ROWS[1]!.name, SIDE);
+    await first.send({ op: 'drag', fromCol: 12, fromRow: target, toCol: 12, toRow: onto });
+
+    const studio = rowOf(first.frame(), 'STUDIO', SIDE);
+    const orders = rowOf(first.frame(), 'ORDERS', SIDE);
+    await first.send({ op: 'drag', fromCol: 6, fromRow: studio, toCol: 6, toRow: orders });
+
+    const expected = first.snapshot().slugs;
+    expect(expected.slice(0, 3)).toEqual([
+      'studio/main:web',
+      'studio/feat-y:web',
+      'orders/feat-ports:run-orders',
+    ]);
+    await first.send({ op: 'settle', ms: 300 });
+    await first.stop();
+
+    const second = await boot();
+    expect(second.snapshot().slugs).toEqual(expected);
+  }, 40_000);
 });
 
 describe('sidebar resizing', () => {

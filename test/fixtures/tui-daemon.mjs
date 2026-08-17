@@ -247,6 +247,40 @@ function saveUi(patch) {
   return next;
 }
 
+// Same trick: `test.targets` grows the list past what the sidebar can show, and
+// the count lives on disk so deleting the file resets it.
+const BULK = join(STATE, 'tui-daemon-targets.json');
+
+function bulkCount() {
+  try {
+    return Number(JSON.parse(readFileSync(BULK, 'utf-8')).count) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function allTargets() {
+  const extra = [];
+  for (let i = 0; i < bulkCount(); i++) {
+    const name = `bulk-${String(i).padStart(2, '0')}`;
+    extra.push(
+      targetOf({
+        slug: `orders/${name}:run-orders`,
+        repoPath: ORDERS,
+        repoName: 'orders',
+        checkoutPath: `/projects/orders-${name}`,
+        branch: name,
+        isMain: false,
+        playbookName: 'Run Orders',
+        slot: 10 + i,
+        available: true,
+        status: 'stopped',
+      }),
+    );
+  }
+  return [...TARGETS, ...extra];
+}
+
 // --- protocol ---------------------------------------------------------------
 
 class Failure extends Error {
@@ -261,9 +295,10 @@ function resolveTarget(params) {
   if (typeof query !== 'string' || query === '') {
     throw new Failure('bad_params', 'target is required');
   }
-  const exact = TARGETS.find((t) => t.slug === query || t.alias === query);
+  const known = allTargets();
+  const exact = known.find((t) => t.slug === query || t.alias === query);
   if (exact) return exact;
-  const matches = TARGETS.filter((t) => t.slug.includes(query) || (t.alias ?? '').includes(query));
+  const matches = known.filter((t) => t.slug.includes(query) || (t.alias ?? '').includes(query));
   if (matches.length === 0) throw new Failure('not_found', `no target matches ${query}`);
   if (matches.length > 1) throw new Failure('ambiguous', `${query} matches ${matches.length}`);
   return matches[0];
@@ -307,7 +342,7 @@ const METHODS = {
     if (!repo) throw new Failure('not_found', `${params?.repoPath} is not registered`);
     return { checkouts: repo.checkouts, playbooks: repo.playbooks };
   },
-  'target.list': () => ({ targets: TARGETS }),
+  'target.list': () => ({ targets: allTargets() }),
   'target.add': (params) => {
     if (!params?.repoPath || !params?.checkoutPath || !params?.playbookName) {
       throw new Failure('bad_params', 'repoPath, checkoutPath and playbookName are required');
@@ -383,6 +418,12 @@ const TEST_METHODS = {
     count: followers.size,
     targets: [...followers.values()].map((f) => f.target),
   }),
+  // Grows target.list past what the sidebar can show. `{count: 0}` restores.
+  'test.targets': (params) => {
+    const count = Math.max(0, Number(params?.count ?? 0));
+    writeFileSync(BULK, JSON.stringify({ count }));
+    return { targets: allTargets().length };
+  },
   // Grows repo.list to prove a long picker still fits its pane. `{count: 0}` restores.
   'test.repos': (params) => {
     const count = Number(params?.count ?? 0);

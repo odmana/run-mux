@@ -7,7 +7,7 @@
  * Tab-focus model costs a keystroke on every interaction and buys nothing.
  */
 
-import type { KeyEvent } from '@opentui/core';
+import type { KeyEvent, ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 
@@ -34,6 +34,7 @@ import {
   HEADER_HEIGHT,
   LogPane,
 } from './logpane.js';
+import { moveInto, NO_ORDER, type SidebarOrder } from './order.js';
 import { Palette, type PaletteForm } from './palette.js';
 import {
   applyFieldValue,
@@ -47,10 +48,13 @@ import {
 import {
   clampSidebarWidth,
   groupTargets,
+  sameClick,
   Sidebar,
   SIDEBAR_WIDTH,
+  targetElementId,
   visibleSlugs,
-  type RowAction,
+  type DragHandle,
+  type SidebarClick,
 } from './sidebar.js';
 import { UI } from './theme.js';
 import { buildParams, filterVerbs, missingFields, type Verb } from './verbs.js';
@@ -179,7 +183,10 @@ export function App(props: AppProps): ReactElement {
   const [now, setNow] = useState(() => Date.now());
   const [storedWidth, setStoredWidth] = useState(SIDEBAR_WIDTH);
   const [edgeLit, setEdgeLit] = useState(false);
+  const [order, setOrder] = useState<SidebarOrder>(NO_ORDER);
+  const [dragging, setDragging] = useState<DragHandle | null>(null);
   const hitSeq = useRef(0);
+  const sidebarBox = useRef<ScrollBoxRenderable | null>(null);
   // The width as of the last drag event, not the last commit: `drag-end` has to
   // persist what the pointer actually landed on, and React may not have rendered it yet.
   const widthRef = useRef(SIDEBAR_WIDTH);
@@ -200,10 +207,13 @@ export function App(props: AppProps): ReactElement {
     hydrated.current = true;
     if (ui.ui.sidebarWidth !== undefined) applyWidth(ui.ui.sidebarWidth);
     if (ui.ui.collapsedRepos !== undefined) setCollapsed(new Set(ui.ui.collapsedRepos));
+    if (ui.ui.repoOrder !== undefined || ui.ui.targetOrder !== undefined) {
+      setOrder({ repos: ui.ui.repoOrder ?? [], targets: ui.ui.targetOrder ?? {} });
+    }
   }, [applyWidth, ui.loaded, ui.ui]);
 
   const { targets, refresh } = useTargets(props.link, props.targetPollMs);
-  const groups = useMemo(() => groupTargets(targets), [targets]);
+  const groups = useMemo(() => groupTargets(targets, order), [targets, order]);
   const slugs = useMemo(() => visibleSlugs(groups, collapsed), [groups, collapsed]);
 
   // The daemon owns the target list, so a selection is only ever a slug that is
@@ -315,13 +325,23 @@ export function App(props: AppProps): ReactElement {
     [call, targets],
   );
 
-  const rowAction = useCallback(
-    (slug: string, action: RowAction) => {
-      if (action === 'toggle') toggleTarget(slug);
-      else void call(METHODS.runRestart, { target: slug }, 'restart');
-    },
-    [call, toggleTarget],
-  );
+  // What the pointer went down on. Cleared by a drag, so a row picked up from
+  // its status dot is reordered rather than stopped.
+  const armed = useRef<SidebarClick | null>(null);
+  // What a drag would carry, and whether this press set it. The root's own
+  // mouse-down runs last, by bubbling, which is how a press anywhere outside the
+  // sidebar drops a grab that a previous press left behind.
+  const grabbed = useRef<DragHandle | null>(null);
+  const grabbedNow = useRef(false);
+
+  const onPress = useCallback((click: SidebarClick) => {
+    armed.current = click;
+  }, []);
+
+  const onGrab = useCallback((handle: DragHandle) => {
+    grabbed.current = handle;
+    grabbedNow.current = true;
+  }, []);
 
   const openPalette = useCallback(
     (prefill?: string) => {
@@ -489,6 +509,81 @@ export function App(props: AppProps): ReactElement {
       patchUi({ collapsedRepos: [...next] });
     },
     [collapsed, patchUi],
+  );
+
+  const onRelease = useCallback(
+    (click: SidebarClick) => {
+      const pending = armed.current;
+      armed.current = null;
+      if (!sameClick(pending, click)) return;
+      if (click.kind === 'fold') {
+        hit(`repo:${click.key}`);
+        toggleGroup(click.key);
+        return;
+      }
+      if (click.kind === 'toggle') toggleTarget(click.key);
+      else void call(METHODS.runRestart, { target: click.key }, 'restart');
+    },
+    [call, hit, toggleGroup, toggleTarget],
+  );
+
+  // Rows scroll out of reach in a long list; `j`/`k` has to bring them back.
+  useEffect(() => {
+    if (selected === null) return;
+    sidebarBox.current?.scrollChildIntoView(targetElementId(selected));
+  }, [selected, groups]);
+
+  const repoOf = useCallback(
+    (handle: DragHandle): string | null =>
+      handle.kind === 'repo'
+        ? handle.key
+        : (targets.find((target) => target.slug === handle.key)?.repoPath ?? null),
+    [targets],
+  );
+
+  /**
+   * A repo header carries its whole group; a target moves only within its own,
+   * because grouping is by `repoPath` and a target dropped into someone else's
+   * block would jump straight back. Moving a target between repos is a
+   * different operation altogether — it would have to move the checkout.
+   */
+  const reorder = useCallback(
+    (to: DragHandle) => {
+      const from = grabbed.current;
+      if (from === null) return;
+      const destination = repoOf(to);
+      if (destination === null) return;
+
+      if (from.kind === 'repo') {
+        const repos = moveInto(
+          groups.map((group) => group.repoPath),
+          from.key,
+          destination,
+        );
+        setOrder((state) => ({ ...state, repos }));
+        patchUi({ repoOrder: repos });
+        return;
+      }
+
+      const origin = repoOf(from);
+      if (origin === null || origin !== destination) return;
+      const group = groups.find((candidate) => candidate.repoPath === origin);
+      if (group === undefined) return;
+
+      const within = group.targets.map((target) => target.slug);
+      // Dropped on the header, a target means "put me at the top of this group".
+      const anchor = to.kind === 'repo' ? within[0] : to.key;
+      if (anchor === undefined) return;
+
+      const moved = moveInto(within, from.key, anchor);
+      const targetOrder: Record<string, string[]> = { [origin]: moved };
+      for (const [repoPath, listed] of Object.entries(order.targets)) {
+        if (repoPath !== origin) targetOrder[repoPath] = [...listed];
+      }
+      setOrder((state) => ({ ...state, targets: targetOrder }));
+      patchUi({ targetOrder });
+    },
+    [groups, order.targets, patchUi, repoOf],
   );
 
   const verbs = useMemo(() => filterVerbs(paletteQuery), [paletteQuery]);
@@ -882,12 +977,25 @@ export function App(props: AppProps): ReactElement {
   return box(
     {
       style: { width: '100%', height: '100%', flexDirection: 'row', backgroundColor: UI.panel },
+      onMouseDown: () => {
+        if (!grabbedNow.current) grabbed.current = null;
+        grabbedNow.current = false;
+      },
       onMouseDrag: (event) => {
-        if (!resizing.current) return;
-        applyWidth(clampSidebarWidth(event.x + 1, dimensions.width));
-        setEdgeLit(true);
+        if (resizing.current) {
+          applyWidth(clampSidebarWidth(event.x + 1, dimensions.width));
+          setEdgeLit(true);
+          return;
+        }
+        const handle = grabbed.current;
+        if (handle === null) return;
+        armed.current = null;
+        setDragging((held) =>
+          held !== null && held.kind === handle.kind && held.key === handle.key ? held : handle,
+        );
       },
       onMouseDragEnd: () => {
+        setDragging(null);
         if (!resizing.current) return;
         resizing.current = false;
         setEdgeLit(false);
@@ -905,11 +1013,15 @@ export function App(props: AppProps): ReactElement {
       now,
       width: sidebarWidth,
       edgeLit,
+      dragging,
+      boxRef: sidebarBox,
       onEdge: setEdgeLit,
       onResizeStart: () => {
         resizing.current = true;
         widthRef.current = sidebarWidth;
       },
+      onGrab,
+      onDrop: reorder,
       onSelect: (slug, x, y) => {
         hit(`target:${slug}@${x},${y}`);
         setSelected(slug);
@@ -920,11 +1032,8 @@ export function App(props: AppProps): ReactElement {
         setSelected(slug);
         openPalette(slug);
       },
-      onAction: rowAction,
-      onToggleGroup: (repoPath) => {
-        hit(`repo:${repoPath}`);
-        toggleGroup(repoPath);
-      },
+      onPress,
+      onRelease,
       onHover: setHovered,
     }),
     box(
