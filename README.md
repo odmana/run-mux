@@ -6,7 +6,7 @@ Run your dev stack from a daemon, not a terminal tab.
 after you close the window, understands git worktrees well enough to run the same stack twice
 without a port fight, and exposes everything over a structured CLI so an agent can drive it.
 
-Extracted from [agent-mux](https://github.com/) 's playbook feature, minus the terminal multiplexer.
+Extracted from [agent-mux](https://github.com/odmana/agent-mux) 's playbook feature, minus the terminal multiplexer.
 
 ```
 rmux                                  # the TUI

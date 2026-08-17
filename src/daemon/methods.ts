@@ -544,7 +544,9 @@ function viewBuilder(ctx: DaemonContext): ViewBuilder {
         slug: record.slug,
         ...(alias === undefined ? {} : { alias }),
         repoPath: plan.repoPath,
-        repoName: basename(plan.repoPath),
+        // The registered key, so a repo reads the same in `repo ls`, in the
+        // sidebar heading and in the first segment of the slug beside it.
+        repoName: repoKeyFor(config, plan.repoPath) ?? basename(plan.repoPath),
         checkoutPath: plan.checkoutPath,
         branch: plan.branch,
         isMain: plan.isMain,
