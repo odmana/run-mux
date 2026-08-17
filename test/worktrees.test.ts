@@ -143,7 +143,12 @@ describe('isAvailable', () => {
   it('leaves a target on a vanished checkout registered but unavailable', () => {
     const dir = repo('orders');
     const linked = worktree(dir, 'feature-x');
-    const created = createTarget({ repoPath: dir, checkoutPath: linked, playbookName: 'dev' });
+    const created = createTarget({
+      repoKey: 'orders',
+      repoPath: dir,
+      checkoutPath: linked,
+      playbookName: 'dev',
+    });
     expect(created.ok).toBe(true);
 
     rmSync(linked, { recursive: true, force: true, maxRetries: 3 });

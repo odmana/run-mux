@@ -229,8 +229,13 @@ describe('slots', () => {
   });
 
   it('recovers per-repo scoping from targets after a restart', () => {
-    createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'dev' });
-    createTarget({ repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'dev' });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'dev',
+    });
+    createTarget({ repoKey: 'orders', repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'dev' });
 
     simulateRestart();
 
@@ -248,7 +253,7 @@ describe('slots', () => {
   });
 
   it('refuses to release a slot while a target still uses the checkout', () => {
-    createTarget({ repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'dev' });
+    createTarget({ repoKey: 'orders', repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'dev' });
     expect(releaseSlot(WT_A1)).toBe(false);
     expect(slotFor(WT_A1)).toBe(1);
   });
@@ -257,43 +262,90 @@ describe('slots', () => {
 describe('targets', () => {
   it('slugs a main worktree as <repo>/main:<playbook>', () => {
     const dir = repo('orders');
-    const slug = slugFor(dir, dir, 'run orders');
-    expect(slug.endsWith('/main:run-orders')).toBe(true);
+    const slug = slugFor({
+      repoKey: 'orders',
+      repoPath: dir,
+      checkoutPath: dir,
+      playbookName: 'run orders',
+    });
+    expect(slug).toBe('orders/main:run-orders');
   });
 
   it('slugs a linked worktree with its branch name', () => {
     const dir = repo('orders');
     const linked = worktree(dir, 'feature-x');
-    expect(slugFor(dir, linked, 'dev').endsWith('/feature-x:dev')).toBe(true);
+    expect(
+      slugFor({
+        repoKey: 'orders',
+        repoPath: dir,
+        checkoutPath: linked,
+        playbookName: 'dev',
+      }),
+    ).toBe('orders/feature-x:dev');
   });
 
-  it('lowercases and collapses dots and spaces', () => {
+  it('uses the repo key verbatim rather than the directory name', () => {
     expect(
-      slugFor('/src/TicketSolutions.Orders', '/src/TicketSolutions.Orders', 'Run Orders'),
-    ).toBe('ticketsolutions-orders/main:run-orders');
+      slugFor({
+        repoKey: 'orders',
+        repoPath: '/src/TicketSolutions.Orders',
+        checkoutPath: '/src/TicketSolutions.Orders',
+        playbookName: 'Run Orders',
+      }),
+    ).toBe('orders/main:run-orders');
+  });
+
+  it('lowercases and collapses dots and spaces in the branch and playbook', () => {
     expect(
-      slugFor('/src/orders', '/src/wt', 'Dev', { branch: 'feature/API  v2', isMain: false }),
+      slugFor({
+        repoKey: 'orders',
+        repoPath: '/src/orders',
+        checkoutPath: '/src/wt',
+        playbookName: 'Dev',
+        checkout: { branch: 'feature/API  v2', isMain: false },
+      }),
     ).toBe('orders/feature-api-v2:dev');
   });
 
   it('falls back to the directory name for a checkout with no branch', () => {
-    expect(slugFor('/src/orders', '/src/wt-detached', 'dev', { branch: '', isMain: false })).toBe(
-      'orders/wt-detached:dev',
-    );
+    expect(
+      slugFor({
+        repoKey: 'orders',
+        repoPath: '/src/orders',
+        checkoutPath: '/src/wt-detached',
+        playbookName: 'dev',
+        checkout: { branch: '', isMain: false },
+      }),
+    ).toBe('orders/wt-detached:dev');
   });
 
   it('creates a target with a slot and rejects a duplicate', () => {
-    const created = createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'dev' });
+    const created = createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'dev',
+    });
     expect(created).toMatchObject({ ok: true, slot: 0 });
 
-    const again = createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'dev' });
+    const again = createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'dev',
+    });
     expect(again).toMatchObject({ ok: false, reason: 'duplicate' });
     expect(listTargets()).toHaveLength(1);
   });
 
   it('keeps the slot until the last target on a checkout is removed', () => {
-    createTarget({ repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'dev' });
-    createTarget({ repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'test' });
+    createTarget({ repoKey: 'orders', repoPath: REPO_A, checkoutPath: WT_A1, playbookName: 'dev' });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: WT_A1,
+      playbookName: 'test',
+    });
     const [first, second] = listTargets();
 
     expect(removeTarget(first!.slug)).toBe(true);
@@ -305,8 +357,18 @@ describe('targets', () => {
   });
 
   it('resolves an exact slug, an alias and a unique prefix', () => {
-    createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'dev' });
-    createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'devtools' });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'dev',
+    });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'devtools',
+    });
     const aliases = aliasMap({ 'orders/main:dev': { alias: 'o' } });
 
     const exact = resolveTarget('orders/main:dev');
@@ -320,8 +382,18 @@ describe('targets', () => {
   });
 
   it('reports every candidate for an ambiguous prefix instead of picking one', () => {
-    createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'dev' });
-    createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'devtools' });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'dev',
+    });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'devtools',
+    });
 
     const result = resolveTarget('orders/main:d');
 
@@ -333,7 +405,12 @@ describe('targets', () => {
   });
 
   it('reports not_found for an unknown query', () => {
-    createTarget({ repoPath: REPO_A, checkoutPath: MAIN_A, playbookName: 'dev' });
+    createTarget({
+      repoKey: 'orders',
+      repoPath: REPO_A,
+      checkoutPath: MAIN_A,
+      playbookName: 'dev',
+    });
     expect(resolveTarget('studio')).toEqual({ ok: false, reason: 'not_found', matches: [] });
   });
 });

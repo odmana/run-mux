@@ -10,13 +10,18 @@ const MAIN_SEGMENT = 'main';
 
 export type CheckoutHint = Pick<Checkout, 'branch' | 'isMain'>;
 
-export interface CreateTargetInput {
+export interface SlugInput {
+  /** The repo's config key. Already slug-safe, so it is used verbatim. */
+  repoKey: string;
   repoPath: string;
   checkoutPath: string;
   playbookName: string;
-  autostart?: boolean;
   /** Skips the git call when the caller already enumerated the checkout. */
   checkout?: CheckoutHint;
+}
+
+export interface CreateTargetInput extends SlugInput {
+  autostart?: boolean;
 }
 
 export type CreateTargetResult =
@@ -37,21 +42,17 @@ export function slugify(part: string): string {
 }
 
 /**
- * `<repo>/<checkout>:<playbook>` — e.g. `orders/main:run-orders`. The checkout
- * segment is `main` for the main worktree and the branch for a linked one,
- * falling back to the directory name when there is no branch (detached HEAD).
+ * `<repo>/<checkout>:<playbook>` — e.g. `orders/main:run-orders`. The repo
+ * segment is the config key, so the name a user registered is the name they
+ * address. The checkout segment is `main` for the main worktree and the branch
+ * for a linked one, falling back to the directory name for a detached HEAD.
  */
-export function slugFor(
-  repoPath: string,
-  checkoutPath: string,
-  playbookName: string,
-  checkout?: CheckoutHint,
-): string {
-  const repo = slugify(basename(canonicalPath(repoPath)));
-  const resolved = checkout ?? findCheckout(repoPath, checkoutPath);
+export function slugFor(input: SlugInput): string {
+  const { repoKey, repoPath, checkoutPath, playbookName } = input;
+  const resolved = input.checkout ?? findCheckout(repoPath, checkoutPath);
   const isMain = resolved?.isMain ?? samePath(repoPath, checkoutPath);
   const segment = isMain ? MAIN_SEGMENT : resolved?.branch || basename(canonicalPath(checkoutPath));
-  return `${repo}/${slugify(segment)}:${slugify(playbookName)}`;
+  return `${repoKey}/${slugify(segment)}:${slugify(playbookName)}`;
 }
 
 export function listTargets(): TargetRecord[] {
@@ -76,7 +77,7 @@ export function createTarget(input: CreateTargetInput): CreateTargetResult {
 
   const checkout = input.checkout ?? findCheckout(repoPath, checkoutPath);
   const isMain = checkout?.isMain ?? samePath(repoPath, checkoutPath);
-  const slug = slugFor(repoPath, checkoutPath, input.playbookName, checkout);
+  const slug = slugFor({ ...input, repoPath, checkoutPath, checkout });
 
   const collision = state.targets.find((target) => target.slug === slug);
   if (collision) return { ok: false, reason: 'slug_conflict', existing: collision };

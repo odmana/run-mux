@@ -12,6 +12,7 @@ import {
   expandPath,
   type Loaded,
   playbookProblems,
+  repoKeyFor,
   resolveEnv,
   resolvePlaybook,
   resolvePlaybooks,
@@ -196,7 +197,11 @@ export function createMethods(ctx: DaemonContext): RequestHandler {
         );
       }
 
-      const created = createTarget({ repoPath, checkoutPath, playbookName });
+      // An unregistered repo has no key, but a checkout with a committed
+      // .run-mux.json is still a legitimate target, so fall back to its name.
+      const repoKey =
+        repoKeyFor(ctx.globalConfig().config, repoPath) ?? slugify(basename(repoPath));
+      const created = createTarget({ repoKey, repoPath, checkoutPath, playbookName });
       if (!created.ok) {
         throw rpcError(
           'conflict',
