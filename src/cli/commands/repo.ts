@@ -6,6 +6,7 @@ import {
   type RepoListResult,
   type RepoRemoveResult,
 } from '../../protocol.js';
+import { flagString } from '../args.js';
 import { CliError, diag, emit, human } from '../output.js';
 import { renderRepos } from '../render.js';
 import { call, type Ctx } from './daemon.js';
@@ -21,7 +22,8 @@ function pathArg(ctx: Ctx, verb: string): string {
 
 export async function add(ctx: Ctx): Promise<void> {
   const path = pathArg(ctx, 'add');
-  const { repo } = await call<RepoAddResult>(ctx, METHODS.repoAdd, { path });
+  const name = flagString(ctx.args, 'as');
+  const { repo } = await call<RepoAddResult>(ctx, METHODS.repoAdd, { path, name });
   emit(ctx.out, { repo });
   for (const problem of repo.problems) diag(`warning: ${problem}`);
   human(ctx.out, `registered ${repo.name}  ${repo.path}`);

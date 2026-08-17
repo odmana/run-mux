@@ -267,6 +267,33 @@ describe('repos', () => {
     expect(((await client.request('repo.list')) as RepoListResult).repos).toHaveLength(0);
   });
 
+  it('mints a repo key from the directory name and registers under it', async () => {
+    const repo = repoWith('Minted.Key', []);
+    const client = await boot();
+
+    const added = (await client.request('repo.add', { path: repo })) as RepoAddResult;
+    expect(added.repo.name).toMatch(/^[a-z0-9][a-z0-9-]*$/);
+    expect(added.repo.name).toContain('minted-key');
+    expect(await client.request('repo.remove', { path: added.repo.name })).toEqual({
+      removed: true,
+    });
+  });
+
+  it('registers under an explicit --as name and rejects an unusable one', async () => {
+    const repo = repoWith('explicit', []);
+    const client = await boot();
+
+    const added = (await client.request('repo.add', { path: repo, name: 'app' })) as RepoAddResult;
+    expect(added.repo.name).toBe('app');
+
+    const other = repoWith('explicit-other', []);
+    const clash = await failure(client.request('repo.add', { path: other, name: 'app' }));
+    expect(clash.code).toBe('conflict');
+
+    const bad = await failure(client.request('repo.add', { path: other, name: 'Not A Key' }));
+    expect(bad.code).toBe('bad_params');
+  });
+
   it('rejects a directory that is not a git repository', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'run-mux-notrepo-'));
     scratch.push(dir);

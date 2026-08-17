@@ -56,6 +56,7 @@ import {
   removeTarget,
   resolveTarget,
   slotFor,
+  slugify,
 } from '../state/index.js';
 import {
   type Checkout,
@@ -68,6 +69,9 @@ import {
   type UiState,
 } from '../types.js';
 import type { Registry, RunEntry } from './registry.js';
+
+/** Mirrors the schema's repo-key rule, so `repo add --as` fails here and not on the next load. */
+const REPO_KEY = /^[a-z0-9][a-z0-9-]*$/;
 
 export interface DaemonContext {
   /** `process.env` as it was when the daemon started. Never re-read. */
@@ -102,6 +106,7 @@ export function createMethods(ctx: DaemonContext): RequestHandler {
 
     [METHODS.repoAdd]: (params): RepoAddResult => {
       const input = expandPath(requireString(params, 'path'));
+      const requested = optionalString(params, 'name');
       const root = repoRoot(input);
       if (root === null) {
         throw rpcError(
@@ -109,35 +114,56 @@ export function createMethods(ctx: DaemonContext): RequestHandler {
           `${input} is not a git repository (or git is not on PATH); run-mux only tracks real checkouts`,
         );
       }
+      if (requested !== undefined && !REPO_KEY.test(requested)) {
+        throw rpcError(
+          'bad_params',
+          `"${requested}" is not a usable repo name: lowercase letters, digits and hyphens only`,
+        );
+      }
+
+      let key = requested ?? '';
       mutateGlobalConfig((raw) => {
-        const repos = asArray(raw.repos);
-        const known = repos.some(
-          (entry) =>
+        const repos = isRecord(raw.repos) ? raw.repos : {};
+        const existing = Object.entries(repos).find(
+          ([, entry]) =>
             isRecord(entry) && typeof entry.path === 'string' && samePath(entry.path, root),
         );
-        if (!known) repos.push({ path: root });
+        if (existing) {
+          key = existing[0];
+          return;
+        }
+        if (requested !== undefined && requested in repos) {
+          throw rpcError('conflict', `"${requested}" is already registered`);
+        }
+        key = requested ?? mintRepoKey(repos, root);
+        repos[key] = { path: root, playbooks: [] };
         raw.repos = repos;
       });
       ctx.reloadConfig();
-      return { repo: repoView(root) };
+      return { repo: repoView(key, root) };
     },
 
     [METHODS.repoList]: (): RepoListResult => ({
-      repos: ctx.globalConfig().config.repos.map((repo) => repoView(repo.path, repo.alias)),
+      repos: Object.entries(ctx.globalConfig().config.repos).map(([key, repo]) =>
+        repoView(key, repo.path),
+      ),
     }),
 
     [METHODS.repoRemove]: (params): RepoRemoveResult => {
-      const input = expandPath(requireString(params, 'path'));
+      const input = requireString(params, 'path');
+      const asPath = expandPath(input);
       let removed = false;
       mutateGlobalConfig((raw) => {
-        const repos = asArray(raw.repos);
-        const kept = repos.filter((entry) => {
+        const repos = isRecord(raw.repos) ? raw.repos : {};
+        for (const [key, entry] of Object.entries(repos)) {
           const match =
-            isRecord(entry) && typeof entry.path === 'string' && samePath(entry.path, input);
-          if (match) removed = true;
-          return !match;
-        });
-        raw.repos = kept;
+            key === input ||
+            (isRecord(entry) && typeof entry.path === 'string' && samePath(entry.path, asPath));
+          if (!match) continue;
+          delete repos[key];
+          removed = true;
+        }
+        raw.repos = repos;
       });
       ctx.reloadConfig();
       return { removed };
@@ -273,7 +299,7 @@ export function createMethods(ctx: DaemonContext): RequestHandler {
         }
       }
 
-      for (const repo of reloaded.config.repos) {
+      for (const repo of Object.values(reloaded.config.repos)) {
         playbookSummaries(repo.path, listCheckouts(repo.path), problems);
       }
       return { problems, stale };
@@ -541,7 +567,7 @@ function statusOf(available: boolean, entry: RunEntry | undefined): TargetStatus
   return entry === undefined ? 'stopped' : entry.status;
 }
 
-function repoView(repoPath: string, alias?: string): RepoView {
+function repoView(key: string, repoPath: string): RepoView {
   const problems: string[] = [];
   const checkouts = listCheckouts(repoPath);
   if (checkouts.length === 0) {
@@ -549,11 +575,21 @@ function repoView(repoPath: string, alias?: string): RepoView {
   }
   return {
     path: repoPath,
-    name: alias ?? basename(repoPath),
+    name: key,
     checkouts,
     playbooks: playbookSummaries(repoPath, checkouts, problems),
     problems,
   };
+}
+
+/** `~/code/TicketSolutions.Orders` -> `ticketsolutions-orders`, `-2` on collision. */
+function mintRepoKey(repos: Record<string, unknown>, repoPath: string): string {
+  const base = slugify(basename(repoPath));
+  if (!(base in repos)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!(candidate in repos)) return candidate;
+  }
 }
 
 /**
@@ -611,10 +647,6 @@ function resolveOrThrow(ctx: DaemonContext, queryText: string): TargetRecord {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 function requireString(params: unknown, key: string): string {

@@ -39,7 +39,7 @@ export interface ResolvedPlaybook extends Playbook {
 
 export interface RepoRegistration {
   path: string;
-  alias?: string;
+  playbooks: Playbook[];
 }
 
 export interface TargetOverrides {
@@ -48,9 +48,11 @@ export interface TargetOverrides {
 }
 
 export interface GlobalConfig {
-  repos: RepoRegistration[];
-  /** Global playbooks carry the repo they belong to; repo-file ones do not. */
-  playbooks: (Playbook & { repo: string })[];
+  /**
+   * Keyed by the repo's name — lowercase, slug-safe, and the segment target slugs
+   * are built from, so the string a user types is the string they wrote here.
+   */
+  repos: Record<string, RepoRegistration>;
   targets: Record<string, TargetOverrides>;
 }
 

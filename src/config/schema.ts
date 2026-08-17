@@ -127,18 +127,36 @@ export const PlaybookSchema = v.pipe(
   ),
 );
 
-/** Global playbooks name the repo they belong to; repo-file ones do not. */
-export const GlobalPlaybookSchema = v.pipe(
-  v.object({ ...playbookEntries, repo: NonEmptyString }),
-  v.check(
-    (pb) => playbookProblems(pb.commands).length === 0,
-    (issue) => playbookProblems(issue.input.commands).join('; '),
+/**
+ * A repo key lands verbatim in every target slug, so it is validated rather than
+ * slugified — silently rewriting it here would hide a key the user has to type.
+ */
+const RepoKey = v.pipe(
+  v.string(),
+  v.regex(
+    /^[a-z0-9][a-z0-9-]*$/,
+    'a repo key must be lowercase letters, digits and hyphens, and start with a letter or digit',
   ),
+);
+
+function duplicatePlaybookNames(playbooks: readonly { name: string }[]): string[] {
+  return duplicates(playbooks.map((pb) => pb.name));
+}
+
+const playbookList = v.optional(
+  v.pipe(
+    v.array(PlaybookSchema),
+    v.check(
+      (playbooks) => duplicatePlaybookNames(playbooks).length === 0,
+      (issue) => `duplicate playbook names: ${duplicatePlaybookNames(issue.input).join(', ')}`,
+    ),
+  ),
+  () => [],
 );
 
 export const RepoRegistrationSchema = v.object({
   path: NonEmptyString,
-  alias: v.optional(NonEmptyString),
+  playbooks: playbookList,
 });
 
 export const TargetOverridesSchema = v.object({
@@ -146,37 +164,29 @@ export const TargetOverridesSchema = v.object({
   env: v.optional(StringRecord),
 });
 
-function duplicateGlobalNames(playbooks: readonly { name: string; repo: string }[]): string[] {
-  const caseInsensitive = process.platform === 'win32';
-  return duplicates(
-    playbooks.map((pb) => {
-      const repo = pb.repo.replaceAll('\\', '/').replace(/\/+$/, '');
-      return `${caseInsensitive ? repo.toLowerCase() : repo}#${pb.name}`;
-    }),
-  );
+/** Comparable form of a configured path. Local so `schema` stays a leaf module. */
+function configPathKey(path: string): string {
+  const cleaned = path.replaceAll('\\', '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? cleaned.toLowerCase() : cleaned;
+}
+
+function duplicateRepoPaths(repos: Record<string, { path: string }>): string[] {
+  return duplicates(Object.values(repos).map((repo) => configPathKey(repo.path)));
 }
 
 export const GlobalConfigSchema = v.pipe(
   v.object({
-    repos: v.optional(v.array(RepoRegistrationSchema), () => []),
-    playbooks: v.optional(v.array(GlobalPlaybookSchema), () => []),
+    repos: v.optional(v.record(RepoKey, RepoRegistrationSchema), () => ({})),
     targets: v.optional(v.record(v.string(), TargetOverridesSchema), () => ({})),
   }),
   v.check(
-    (cfg) => duplicateGlobalNames(cfg.playbooks).length === 0,
+    (cfg) => duplicateRepoPaths(cfg.repos).length === 0,
     (issue) =>
-      `duplicate playbook names for the same repo: ${duplicateGlobalNames(issue.input.playbooks).join(', ')}`,
+      `several repo keys point at the same path: ${duplicateRepoPaths(issue.input.repos).join(', ')}`,
   ),
 );
 
-export const RepoConfigSchema = v.pipe(
-  v.object({ playbooks: v.optional(v.array(PlaybookSchema), () => []) }),
-  v.check(
-    (cfg) => duplicates(cfg.playbooks.map((pb) => pb.name)).length === 0,
-    (issue) =>
-      `duplicate playbook names: ${duplicates(issue.input.playbooks.map((pb) => pb.name)).join(', ')}`,
-  ),
-);
+export const RepoConfigSchema = v.object({ playbooks: playbookList });
 
 export type ParsedGlobalConfig = v.InferOutput<typeof GlobalConfigSchema>;
 export type ParsedRepoConfig = v.InferOutput<typeof RepoConfigSchema>;

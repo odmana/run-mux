@@ -110,6 +110,8 @@ export interface DaemonStatusResult extends PingResult {
  */
 export interface RepoAddParams {
   path: string;
+  /** The config key to register under. Derived from the directory name when omitted. */
+  name?: string;
 }
 export interface RepoAddResult {
   repo: RepoView;

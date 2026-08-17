@@ -1,6 +1,5 @@
 export {
   GlobalConfigSchema,
-  GlobalPlaybookSchema,
   PlaybookCommandSchema,
   PlaybookSchema,
   RepoConfigSchema,
@@ -25,7 +24,13 @@ export {
 } from './load.js';
 export type { Loaded } from './load.js';
 
-export { canonicalPath, resolvePlaybook, resolvePlaybooks, samePath } from './resolve.js';
+export {
+  canonicalPath,
+  repoKeyFor,
+  resolvePlaybook,
+  resolvePlaybooks,
+  samePath,
+} from './resolve.js';
 export type { ResolvedPlaybooks } from './resolve.js';
 
 export { parseEnvFile, resolveEnv } from './env.js';

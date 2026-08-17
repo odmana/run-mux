@@ -67,16 +67,41 @@ describe('schema validation', () => {
 
   it('round-trips a valid global config', () => {
     writeGlobal({
-      repos: [{ path: '/code/app', alias: 'app' }],
-      playbooks: [{ name: 'dev', repo: '/code/app', commands: [api] }],
+      repos: { app: { path: '/code/app', playbooks: [{ name: 'dev', commands: [api] }] } },
       targets: { 'app/main:dev': { alias: 'main', env: { PORT: '4000' } } },
     });
 
     const { config, problems } = loadGlobalConfig();
     expect(problems).toEqual([]);
-    expect(config.repos).toEqual([{ path: '/code/app', alias: 'app' }]);
-    expect(config.playbooks[0]?.name).toBe('dev');
+    expect(config.repos.app?.path).toBe('/code/app');
+    expect(config.repos.app?.playbooks[0]?.name).toBe('dev');
     expect(config.targets['app/main:dev']?.env).toEqual({ PORT: '4000' });
+  });
+
+  it('defaults a repo with no playbooks to an empty list', () => {
+    writeGlobal({ repos: { app: { path: '/code/app' } } });
+
+    const { config, problems } = loadGlobalConfig();
+    expect(problems).toEqual([]);
+    expect(config.repos.app?.playbooks).toEqual([]);
+  });
+
+  it('rejects a repo key that is not slug-safe', () => {
+    writeGlobal({ repos: { 'My Repo': { path: '/code/app' } } });
+
+    const { config, problems } = loadGlobalConfig();
+    expect(config.repos).toEqual({});
+    expect(problems[0]).toMatch(/lowercase letters, digits and hyphens/);
+  });
+
+  it('rejects two repo keys pointing at the same path', () => {
+    writeGlobal({
+      repos: { app: { path: '/code/app' }, app2: { path: '/code/app/' } },
+    });
+
+    const { config, problems } = loadGlobalConfig();
+    expect(config.repos).toEqual({});
+    expect(problems[0]).toMatch(/same path/);
   });
 
   it('rejects dependsOn on an unknown label', () => {
@@ -185,25 +210,30 @@ describe('schema validation', () => {
     expect(loadRepoConfig(checkout).problems[0]).toMatch(/duplicate playbook names: dev/);
   });
 
-  it('rejects duplicate playbook names for the same repo in the global config', () => {
+  it('rejects duplicate playbook names within one repo in the global config', () => {
     writeGlobal({
-      playbooks: [
-        { name: 'dev', repo: '/code/app', commands: [api] },
-        { name: 'dev', repo: '/code/app/', commands: [migrate] },
-      ],
+      repos: {
+        app: {
+          path: '/code/app',
+          playbooks: [
+            { name: 'dev', commands: [api] },
+            { name: 'dev', commands: [migrate] },
+          ],
+        },
+      },
     });
 
     const { config, problems } = loadGlobalConfig();
-    expect(config.playbooks).toEqual([]);
-    expect(problems[0]).toMatch(/duplicate playbook names for the same repo/);
+    expect(config.repos).toEqual({});
+    expect(problems[0]).toMatch(/duplicate playbook names/);
   });
 
   it('allows the same playbook name for different repos', () => {
     writeGlobal({
-      playbooks: [
-        { name: 'dev', repo: '/code/app', commands: [api] },
-        { name: 'dev', repo: '/code/other', commands: [migrate] },
-      ],
+      repos: {
+        app: { path: '/code/app', playbooks: [{ name: 'dev', commands: [api] }] },
+        other: { path: '/code/other', playbooks: [{ name: 'dev', commands: [migrate] }] },
+      },
     });
 
     expect(loadGlobalConfig().problems).toEqual([]);
@@ -213,7 +243,7 @@ describe('schema validation', () => {
 describe('loading', () => {
   it('treats a missing global config as empty without a problem', () => {
     const { config, problems } = loadGlobalConfig();
-    expect(config).toEqual({ repos: [], playbooks: [], targets: {} });
+    expect(config).toEqual({ repos: {}, targets: {} });
     expect(problems).toEqual([]);
   });
 
@@ -228,7 +258,7 @@ describe('loading', () => {
     writeFileSync(join(checkout, '.run-mux.json'), 'not json at all', 'utf-8');
 
     const global = loadGlobalConfig();
-    expect(global.config).toEqual({ repos: [], playbooks: [], targets: {} });
+    expect(global.config).toEqual({ repos: {}, targets: {} });
     expect(global.problems).toHaveLength(1);
     expect(global.problems[0]).toContain('config.json');
 
@@ -239,11 +269,11 @@ describe('loading', () => {
   });
 
   it('reports a schema-invalid config without throwing', () => {
-    writeGlobal({ repos: 'nope', playbooks: [] });
+    writeGlobal({ repos: 'nope' });
     writeRepo({ playbooks: [{ name: '', commands: [] }] });
 
     const global = loadGlobalConfig();
-    expect(global.config).toEqual({ repos: [], playbooks: [], targets: {} });
+    expect(global.config).toEqual({ repos: {}, targets: {} });
     expect(global.problems[0]).toMatch(/repos/);
 
     const repo = loadRepoConfig(checkout);
@@ -255,19 +285,17 @@ describe('loading', () => {
     writeGlobal({});
     const { config, problems } = loadGlobalConfig();
     expect(problems).toEqual([]);
-    expect(config).toEqual({ repos: [], playbooks: [], targets: {} });
+    expect(config).toEqual({ repos: {}, targets: {} });
   });
 
   it('expands a leading tilde and normalises separators', () => {
     writeGlobal({
-      repos: [{ path: '~/code/app' }, { path: 'C:\\code\\other' }],
-      playbooks: [{ name: 'dev', repo: '~/code/app', commands: [api] }],
+      repos: { app: { path: '~/code/app' }, other: { path: 'C:\\code\\other' } },
     });
 
     const { config } = loadGlobalConfig();
-    expect(config.repos[0]?.path).toBe(normalize(join(homedir(), 'code/app')));
-    expect(config.repos[1]?.path).toBe('C:/code/other');
-    expect(config.playbooks[0]?.repo).toBe(normalize(join(homedir(), 'code/app')));
+    expect(config.repos.app?.path).toBe(normalize(join(homedir(), 'code/app')));
+    expect(config.repos.other?.path).toBe('C:/code/other');
     expect(expandPath('~')).toBe(normalize(homedir()));
   });
 
@@ -277,7 +305,7 @@ describe('loading', () => {
 
     const first = loadGlobalConfig();
     expect(first.problems).toEqual([]);
-    expect(first.config).toEqual({ repos: [], playbooks: [], targets: {} });
+    expect(first.config).toEqual({ repos: {}, targets: {} });
 
     const contents = readFileSync(path, 'utf-8');
     expect(contents).toContain('//');
@@ -305,9 +333,12 @@ describe('playbook precedence', () => {
       ],
     });
     writeGlobal({
-      playbooks: [
-        { name: 'dev', repo: checkout, commands: [{ label: 'api', command: ticker([1]) }] },
-      ],
+      repos: {
+        app: {
+          path: checkout,
+          playbooks: [{ name: 'dev', commands: [{ label: 'api', command: ticker([1]) }] }],
+        },
+      },
     });
 
     const { playbooks } = resolvePlaybooks(repoPath(), checkout);
@@ -320,7 +351,7 @@ describe('playbook precedence', () => {
   it('adds a global playbook with a new name alongside repo ones', () => {
     writeRepo({ playbooks: [{ name: 'dev', commands: [api] }] });
     writeGlobal({
-      playbooks: [{ name: 'e2e', repo: checkout, commands: [migrate] }],
+      repos: { app: { path: checkout, playbooks: [{ name: 'e2e', commands: [migrate] }] } },
     });
 
     const { playbooks } = resolvePlaybooks(repoPath(), checkout);
@@ -333,7 +364,12 @@ describe('playbook precedence', () => {
   it('ignores global playbooks belonging to another repo', () => {
     writeRepo({ playbooks: [{ name: 'dev', commands: [api] }] });
     writeGlobal({
-      playbooks: [{ name: 'dev', repo: join(home.root, 'elsewhere'), commands: [migrate] }],
+      repos: {
+        elsewhere: {
+          path: join(home.root, 'elsewhere'),
+          playbooks: [{ name: 'dev', commands: [migrate] }],
+        },
+      },
     });
 
     const { playbooks } = resolvePlaybooks(repoPath(), checkout);
@@ -344,9 +380,12 @@ describe('playbook precedence', () => {
   it('matches the repo path across separators and trailing slashes', () => {
     writeRepo({ playbooks: [{ name: 'dev', commands: [api] }] });
     writeGlobal({
-      playbooks: [
-        { name: 'dev', repo: `${checkout.replaceAll('/', '\\')}\\`, commands: [migrate] },
-      ],
+      repos: {
+        app: {
+          path: `${checkout.replaceAll('/', '\\')}\\`,
+          playbooks: [{ name: 'dev', commands: [migrate] }],
+        },
+      },
     });
 
     expect(resolvePlaybooks(repoPath(), checkout).playbooks[0]?.source).toBe('global');
@@ -357,7 +396,9 @@ describe('playbook precedence', () => {
     () => {
       writeRepo({ playbooks: [{ name: 'dev', commands: [api] }] });
       writeGlobal({
-        playbooks: [{ name: 'dev', repo: checkout.toUpperCase(), commands: [migrate] }],
+        repos: {
+          app: { path: checkout.toUpperCase(), playbooks: [{ name: 'dev', commands: [migrate] }] },
+        },
       });
 
       expect(resolvePlaybooks(repoPath(), checkout).playbooks[0]?.source).toBe('global');

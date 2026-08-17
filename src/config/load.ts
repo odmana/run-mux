@@ -14,7 +14,7 @@ export interface Loaded<T> {
 }
 
 export function emptyGlobalConfig(): GlobalConfig {
-  return { repos: [], playbooks: [], targets: {} };
+  return { repos: {}, targets: {} };
 }
 
 export function emptyRepoConfig(): RepoConfig {
@@ -62,8 +62,12 @@ export function loadGlobalConfig(): Loaded<GlobalConfig> {
   const parsed = result.output;
   return {
     config: {
-      repos: parsed.repos.map((repo) => ({ ...repo, path: expandPath(repo.path) })),
-      playbooks: parsed.playbooks.map((pb) => ({ ...pb, repo: expandPath(pb.repo) })),
+      repos: Object.fromEntries(
+        Object.entries(parsed.repos).map(([key, repo]) => [
+          key,
+          { ...repo, path: expandPath(repo.path) },
+        ]),
+      ),
       targets: parsed.targets,
     },
     problems: [],
@@ -96,14 +100,16 @@ export function repoConfigPath(checkoutPath: string): string {
 const STARTER_CONFIG = {
   '//': [
     'run-mux global config.',
-    'repos:     checkouts run-mux knows about, e.g. { "path": "~/code/app", "alias": "app" }.',
-    'playbooks: named command sets. A global playbook names the repo it belongs to and',
-    "           replaces a same-named playbook from that repo's .run-mux.json wholesale.",
-    'targets:   per-target overrides keyed by target slug, e.g. { "env": { "PORT": "4000" } }.',
+    'repos:   checkouts run-mux knows about, keyed by the short name you address them by:',
+    '         "app": { "path": "~/code/app", "playbooks": [ ... ] }.',
+    '         The key is lowercase letters, digits and hyphens, and it is the first',
+    '         segment of every target slug — app/main:dev.',
+    "         A playbook here replaces a same-named one from that repo's .run-mux.json",
+    '         wholesale, so you can override one without inheriting commands you removed.',
+    'targets: per-target overrides keyed by target slug, e.g. { "env": { "PORT": "4000" } }.',
     'A command is a service unless it sets "type": "task"; only a task may be depended on.',
   ],
-  repos: [],
-  playbooks: [],
+  repos: {},
   targets: {},
 };
 

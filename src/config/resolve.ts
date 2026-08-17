@@ -1,6 +1,6 @@
 import { platform } from 'node:os';
 
-import type { ResolvedPlaybook } from '../types.js';
+import type { GlobalConfig, ResolvedPlaybook } from '../types.js';
 import { expandPath, loadGlobalConfig, loadRepoConfig } from './load.js';
 
 /** Comparable form of a path: tilde expanded, forward-slashed, no trailing slash. */
@@ -11,6 +11,15 @@ export function canonicalPath(input: string): string {
 
 export function samePath(a: string, b: string): boolean {
   return canonicalPath(a) === canonicalPath(b);
+}
+
+/**
+ * The config key for a registered repo, or undefined when it isn't registered —
+ * a checkout with only a committed `.run-mux.json` is still a legitimate target.
+ * Takes the config rather than loading it so the daemon can pass its cached copy.
+ */
+export function repoKeyFor(config: GlobalConfig, repoPath: string): string | undefined {
+  return Object.entries(config.repos).find(([, repo]) => samePath(repo.path, repoPath))?.[0];
 }
 
 export interface ResolvedPlaybooks {
@@ -35,9 +44,8 @@ export function resolvePlaybooks(repoPath: string, checkoutPath: string): Resolv
     source: 'repo',
   }));
 
-  for (const entry of global.config.playbooks) {
-    if (!samePath(entry.repo, owner)) continue;
-    const { repo: _repo, ...playbook } = entry;
+  const entry = Object.values(global.config.repos).find((repo) => samePath(repo.path, owner));
+  for (const playbook of entry?.playbooks ?? []) {
     const resolved: ResolvedPlaybook = { ...playbook, repoPath: owner, source: 'global' };
     const existing = playbooks.findIndex((pb) => pb.name === resolved.name);
     if (existing === -1) playbooks.push(resolved);
