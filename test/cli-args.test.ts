@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 
 import { flagNumber, flagString, parseArgs, parseSince } from '../src/cli/args.js';
 import { makeOut, pad, paint } from '../src/cli/output.js';

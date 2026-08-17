@@ -4,13 +4,12 @@
  * go down in.
  */
 
-import { readFileSync } from 'node:fs';
-
 import { type Loaded, loadGlobalConfig } from '../config/index.js';
 import { createIpcServer, type IpcServer } from '../ipc/index.js';
 import { socketPath } from '../paths.js';
 import { listTargets } from '../state/index.js';
 import type { GlobalConfig } from '../types.js';
+import { VERSION } from '../version.js';
 import { createMethods, type DaemonContext, startTarget } from './methods.js';
 import { reapOrphans, type ReapResult } from './reap.js';
 import { Registry } from './registry.js';
@@ -57,7 +56,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
 export function createDaemon(options: DaemonOptions = {}): Daemon {
   const startedAt = Date.now();
   const env: NodeJS.ProcessEnv = { ...(options.env ?? process.env) };
-  const version = packageVersion();
+  const version = VERSION;
   const path = options.path ?? socketPath();
   const note = options.onNote ?? ((): void => {});
   const report = options.onError ?? ((): void => {});
@@ -174,18 +173,4 @@ export function installSignalHandlers(daemon: Daemon): () => void {
   return () => {
     for (const { signal, handler } of handlers) process.off(signal, handler);
   };
-}
-
-let cachedVersion: string | undefined;
-
-/** Two levels up is the package root from both `src/daemon/` and `dist/daemon/`. */
-function packageVersion(): string {
-  if (cachedVersion !== undefined) return cachedVersion;
-  try {
-    const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf-8');
-    cachedVersion = (JSON.parse(raw) as { version?: string }).version ?? '0.0.0';
-  } catch {
-    cachedVersion = '0.0.0';
-  }
-  return cachedVersion;
 }

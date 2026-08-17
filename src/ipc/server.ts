@@ -4,12 +4,13 @@
  * pipe and filesystem permissions are the authorisation.
  */
 
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { connect as netConnect, createServer, type Server, type Socket } from 'node:net';
 import { platform } from 'node:os';
 
 import { socketPath } from '../paths.js';
 import { PROTOCOL_VERSION, type HelloFrame, type RpcError } from '../types.js';
+import { VERSION } from '../version.js';
 import {
   DecodeError,
   encodeFrame,
@@ -106,7 +107,7 @@ export interface IpcServer {
 
 export function createIpcServer(options: IpcServerOptions): IpcServer {
   const path = options.path ?? socketPath();
-  const version = options.version ?? packageVersion();
+  const version = options.version ?? VERSION;
   const sockets = new Set<Socket>();
   let connectionSeq = 0;
   let listening = false;
@@ -317,8 +318,17 @@ function streamIdOf(params: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
+/**
+ * Bun on Windows reports a busy named pipe as a bare `Failed to listen at ...`
+ * TypeError carrying a misleading `ERR_INVALID_ARG_TYPE` code and no `errno`,
+ * where Node sets `EADDRINUSE`. Its genuine listen failures (a malformed path)
+ * do carry an `errno`, so that is what tells the two apart.
+ */
 function describeBindError(error: NodeJS.ErrnoException, path: string): Error {
-  if (error.code === 'EADDRINUSE') {
+  const addressInUse =
+    error.code === 'EADDRINUSE' ||
+    (error.errno === undefined && error.message.startsWith('Failed to listen at '));
+  if (addressInUse) {
     return rpcError(
       'conflict',
       `another run-mux daemon is already listening on ${path}; run \`rmux daemon restart\` if it is wedged`,
@@ -358,18 +368,4 @@ function isAddressLive(path: string): Promise<boolean> {
     socket.once('connect', () => done(true));
     socket.once('error', () => done(false));
   });
-}
-
-let cachedVersion: string | undefined;
-
-/** Two levels up from this module is the package root in both src/ and dist/. */
-function packageVersion(): string {
-  if (cachedVersion !== undefined) return cachedVersion;
-  try {
-    const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf-8');
-    cachedVersion = (JSON.parse(raw) as { version?: string }).version ?? '0.0.0';
-  } catch {
-    cachedVersion = '0.0.0';
-  }
-  return cachedVersion;
 }

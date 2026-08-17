@@ -1,7 +1,6 @@
+import { afterEach, beforeEach, describe, expect, it, jest, spyOn } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createRun,
@@ -50,7 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  vi.restoreAllMocks();
+  jest.restoreAllMocks();
   for (const handle of opened) await handle.finishRun();
   opened.length = 0;
   home.cleanup();
@@ -249,7 +248,7 @@ describe('retention', () => {
 
     const kept = listRunIds(SLUG);
     expect(kept).toHaveLength(RUNS_KEPT_PER_TARGET);
-    expect(kept[0]).toBe(ids.at(-1));
+    expect(kept[0]).toBe(ids.at(-1)!);
     const newest = ids.slice(2);
     newest.reverse();
     expect(kept).toEqual(newest);
@@ -297,12 +296,12 @@ describe('run ordering', () => {
 
   it('orders runs created within the same millisecond', async () => {
     const frozen = Date.now();
-    vi.spyOn(Date, 'now').mockReturnValue(frozen);
+    spyOn(Date, 'now').mockReturnValue(frozen);
 
     const a = createRun(SLUG, PLAYBOOK);
     const b = createRun(SLUG, PLAYBOOK);
     const c = createRun(SLUG, PLAYBOOK);
-    vi.restoreAllMocks();
+    jest.restoreAllMocks();
 
     expect(new Set([a.runId, b.runId, c.runId]).size).toBe(3);
     expect(listRunIds(SLUG)).toEqual([c.runId, b.runId, a.runId]);

@@ -1,9 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
 
 import { makeOut, type Out } from '../src/cli/output.js';
 import { renderLogEntry, renderTargets } from '../src/cli/render.js';
@@ -12,11 +11,9 @@ import { EXIT_CODES } from '../src/types.js';
 import { isAlive, useTempHome, waitFor, type TempHome } from './helpers.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const TSX = resolve(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const CLI = resolve(ROOT, 'src', 'cli', 'index.ts');
 const FAKE_DAEMON = resolve(ROOT, 'test', 'fixtures', 'fake-daemon.mjs');
 const TUI_STUB = resolve(ROOT, 'test', 'fixtures', 'tui-stub.mjs');
-const FAKE_NODE_VERSION = resolve(ROOT, 'test', 'fixtures', 'fake-node-version.mjs');
 const ESC = String.fromCharCode(27);
 const PACKAGE_VERSION = (
   JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8')) as { version: string }
@@ -56,7 +53,7 @@ interface CliRun {
  */
 function rmux(args: string[], env: NodeJS.ProcessEnv = {}): Promise<CliRun> {
   return new Promise((done, fail) => {
-    const child = spawn(process.execPath, [TSX, CLI, ...args], {
+    const child = spawn(process.execPath, [CLI, ...args], {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
@@ -515,39 +512,13 @@ describe('help and version', () => {
 });
 
 describe('bare rmux launches the TUI', () => {
-  it('spawns the entry with --experimental-ffi, inherits stdio and returns its exit code', async () => {
+  it('spawns the entry, inherits stdio and returns its exit code', async () => {
     const run = await rmux([], { RUN_MUX_TUI_ENTRY: TUI_STUB, TUI_STUB_EXIT: '7' });
 
     expect(run.code).toBe(7);
-    expect(run.stdout).toContain('tui-stub: ffi=true');
+    expect(run.stdout).toContain('tui-stub: on stdout');
     expect(run.stderr).toContain('tui-stub: on stderr');
     // The TUI opens its own connection; launching it must not autospawn one.
-    expect(daemonStarted()).toBe(false);
-  });
-
-  it('suggests a build instead of crashing when the entry is missing', async () => {
-    const run = await rmux([], { RUN_MUX_TUI_ENTRY: join(home.root, 'nowhere', 'index.js') });
-
-    expect(run.code).toBe(EXIT_CODES.unavailable);
-    expect(run.stderr).toContain('pnpm build');
-    expect(run.stderr).toContain('not built');
-    expect(run.stderr).not.toContain('ENOENT');
-    expect(run.stdout.trim()).toBe('');
-    expect(daemonStarted()).toBe(false);
-  });
-
-  it('refuses to spawn on a Node below 26.1 and says how to fix it', async () => {
-    const run = await rmux([], {
-      RUN_MUX_TUI_ENTRY: TUI_STUB,
-      RUN_MUX_FAKE_NODE: '24.14.0',
-      NODE_OPTIONS: `--import ${pathToFileURL(FAKE_NODE_VERSION).href}`,
-    });
-
-    expect(run.code).toBe(EXIT_CODES.unavailable);
-    expect(run.stderr).toContain('needs Node 26.1 or newer');
-    expect(run.stderr).toContain('this is Node 24.14.0');
-    expect(run.stderr).toContain('fnm use');
-    expect(run.stdout).not.toContain('tui-stub');
     expect(daemonStarted()).toBe(false);
   });
 });

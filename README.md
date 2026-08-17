@@ -14,6 +14,20 @@ rmux start orders/main                # or just drive it from the shell
 rmux logs orders/main --follow --json # or let an agent drive it
 ```
 
+## Install
+
+`rmux` is a single self-contained executable — the runtime is compiled in, so there is nothing to
+install alongside it. Build it with [Bun](https://bun.sh) (version in `.bun-version`):
+
+```
+pnpm install
+pnpm build      # dist/rmux, for this machine
+pnpm build:all  # windows-x64, linux-x64, linux-arm64, darwin-x64, darwin-arm64
+```
+
+Expect 70–135 MB per binary depending on platform. Bun's runtime is nearly all of that, and there
+is no way to leave it out.
+
 ## Why
 
 Running a dev stack usually means three terminal tabs, and losing them all when the window closes.
@@ -155,7 +169,12 @@ definition it started with until you restart it.
 pnpm install
 pnpm check        # lint, format, typecheck, build, test
 pnpm test
+pnpm dev ls       # run from source, no build
 ```
+
+Bun is the runtime, the bundler and the test runner. pnpm keeps the install job because it alone
+fetches OpenTUI's native core for every platform, which is what lets one machine cross-compile
+every release binary.
 
 Tests drive mock commands in `test/fixtures/`, never real applications. See `CLAUDE.md` for the
 module layout and conventions.

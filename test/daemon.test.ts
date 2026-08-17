@@ -1,10 +1,9 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type Daemon, type DaemonOptions, startDaemon } from '../src/daemon/index.js';
 import { connect, type IpcClient, type RpcFailure } from '../src/ipc/index.js';
@@ -481,7 +480,7 @@ describe('environment', () => {
     expect(mainEnv.MUX_PLAYBOOK).toBe('env');
     expect(mainEnv.MUX_CHECKOUT?.toLowerCase()).toBe(repo.toLowerCase());
     expect(mainEnv.MUX_REPO?.toLowerCase()).toBe(repo.toLowerCase());
-    expect(mainEnv.MUX_REPO_NAME?.toLowerCase()).toBe(repo.split('/').pop()?.toLowerCase());
+    expect(mainEnv.MUX_REPO_NAME?.toLowerCase()).toBe(repo.split('/').pop()!.toLowerCase());
 
     await client.request('run.start', { target: linked.slug });
     const linkedEnv = await dumpedEnv(client, linked.slug);
@@ -772,7 +771,7 @@ describe('orphan reaping', () => {
     await waitFor(() => !isAlive(doomedPid), { label: 'the orphan to die' });
     expect(isAlive(survivorPid)).toBe(true);
     expect(loadState().children).toEqual([]);
-  });
+  }, 20_000);
 
   it('leaves state clean when a recorded child is already gone', async () => {
     const fixture = join(FIXTURES, 'ticker.mjs');

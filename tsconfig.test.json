@@ -3,8 +3,8 @@
   "compilerOptions": {
     "noEmit": true,
     // The base config emits from src/; this one only typechecks, and has to
-    // reach test/ and the vitest config too.
+    // reach test/ and the build script too.
     "rootDir": "."
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "scripts"]
 }

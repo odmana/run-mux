@@ -3,58 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "rmux": "./dist/cli/index.js"
-  },
-  "engines": {
-    "node": ">=26.1.0"
-  },
   "scripts": {
-    "build": "tsc",
+    "build": "bun scripts/build.ts",
+    "build:all": "bun scripts/build.ts --all",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "dev": "tsx src/cli/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "dev": "bun src/cli/index.ts",
+    "test": "bun test --timeout 20000",
+    "test:watch": "bun test --watch --timeout 20000",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
-    "fmt": "oxfmt src test",
-    "fmt:check": "oxfmt --check src test",
+    "fmt": "oxfmt src test scripts",
+    "fmt:check": "oxfmt --check src test scripts",
     "check": "pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm build && pnpm test"
   },
   "dependencies": {
     "@opentui/core": "0.5.3",
     "@opentui/react": "0.5.3",
     "react": "19.2.0",
-    "run-mux": "link:",
     "valibot": "1.3.1"
   },
   "devDependencies": {
+    "@types/bun": "1.3.14",
     "@types/node": "25.6.0",
     "@types/react": "19.2.2",
     "oxfmt": "0.44.0",
     "oxlint": "1.59.0",
-    "tsx": "4.21.0",
-    "typescript": "6.0.2",
-    "vitest": "4.1.4"
-  },
-  "pnpm": {
-    "overrides": {
-      "es-module-lexer": "2.3.1"
-    },
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ],
-    "packageExtensions": {
-      "@opentui/react": {
-        "peerDependenciesMeta": {
-          "react-devtools-core": {
-            "optional": true
-          },
-          "ws": {
-            "optional": true
-          }
-        }
-      }
-    }
+    "typescript": "6.0.2"
   }
 }

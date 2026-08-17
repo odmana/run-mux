@@ -6,10 +6,6 @@
  * other verb goes through `ctx.client()`, which does.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { ensureDaemon, isRpcFailure, tryConnect, type IpcClient } from '../../ipc/index.js';
 import { socketPath } from '../../paths.js';
 import { METHODS, type DaemonStatusResult } from '../../protocol.js';
@@ -32,39 +28,20 @@ export interface Session extends Ctx {
   dispose(): Promise<void>;
 }
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-/** Walks up from this module: `dist/cli/commands` and `src/cli/commands` both land on the root. */
-function packageRoot(): string {
-  let dir = HERE;
-  for (;;) {
-    if (existsSync(join(dir, 'package.json'))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return HERE;
-    dir = parent;
-  }
-}
-
 /**
- * The daemon is spawned as a script, never imported: the CLI must start and
- * answer `--version` without loading a line of daemon code.
+ * The daemon is spawned as its own process, never imported: the CLI must start
+ * and answer `--version` without loading a line of daemon code. Undefined means
+ * re-exec this binary in its daemon role, which is the only thing that works
+ * once compiled; `RUN_MUX_DAEMON_ENTRY` overrides it with a script, which is how
+ * tests substitute a stub.
  */
-export function daemonEntry(): string {
-  return process.env.RUN_MUX_DAEMON_ENTRY ?? resolve(packageRoot(), 'dist', 'daemon', 'index.js');
+export function daemonEntry(): string | undefined {
+  return process.env.RUN_MUX_DAEMON_ENTRY;
 }
 
 /** The TUI is spawned the same way, and for the same reason. */
-export function tuiEntry(): string {
-  return process.env.RUN_MUX_TUI_ENTRY ?? resolve(packageRoot(), 'dist', 'tui', 'index.js');
-}
-
-export function cliVersion(): string {
-  try {
-    const raw = readFileSync(join(packageRoot(), 'package.json'), 'utf-8');
-    return (JSON.parse(raw) as { version?: string }).version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
+export function tuiEntry(): string | undefined {
+  return process.env.RUN_MUX_TUI_ENTRY;
 }
 
 async function open(): Promise<IpcClient> {

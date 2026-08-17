@@ -1,9 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { canonicalPath, isAvailable, listCheckouts, repoRoot } from '../src/git/index.js';
 import {

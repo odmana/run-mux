@@ -1,6 +1,5 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { stateDir, statePath } from '../src/paths.js';
 import {

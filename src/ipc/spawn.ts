@@ -10,6 +10,7 @@ import { open } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { daemonLogPath, lockPath, socketPath } from '../paths.js';
+import { DAEMON_ROLE, roleArgs } from '../roles.js';
 import { connect, type IpcClient } from './client.js';
 import { rpcError } from './framing.js';
 
@@ -24,8 +25,12 @@ const LOCK_WRITE_GRACE_MS = 2000;
 const LOCK_ATTEMPTS = 5;
 
 export interface EnsureDaemonOptions {
-  /** Script the daemon runs, executed with the current node binary. */
-  entry: string;
+  /**
+   * Script to run instead of re-execing ourselves in the daemon role. Only set
+   * by `RUN_MUX_DAEMON_ENTRY`, which is how tests substitute a stub daemon — a
+   * compiled binary has no script to point at.
+   */
+  entry?: string;
   args?: string[];
   execPath?: string;
   env?: NodeJS.ProcessEnv;
@@ -106,9 +111,10 @@ function spawnDaemon(
   mkdirSync(dirname(logPath), { recursive: true });
   const fd = openSync(logPath, 'a');
   try {
+    const command = options.entry === undefined ? roleArgs(DAEMON_ROLE) : [options.entry];
     const child = spawn(
       options.execPath ?? process.execPath,
-      [options.entry, ...(options.args ?? [])],
+      [...command, ...(options.args ?? [])],
       {
         detached: true,
         stdio: ['ignore', fd, fd],

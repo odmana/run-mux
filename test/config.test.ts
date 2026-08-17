@@ -1,8 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   ensureGlobalConfig,

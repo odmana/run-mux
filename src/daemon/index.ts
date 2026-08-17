@@ -1,11 +1,7 @@
-#!/usr/bin/env node
 /**
- * The daemon process. Autospawn runs this file with the current node binary and
- * points its stdio at `daemon.log`, so everything written here ends up there.
+ * The daemon process. Autospawn re-execs the binary in its daemon role and points
+ * its stdio at `daemon.log`, so everything written here ends up there.
  */
-
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { createDaemon, installSignalHandlers } from './daemon.js';
 
@@ -22,7 +18,7 @@ function stamp(): string {
   return new Date().toISOString();
 }
 
-async function main(): Promise<void> {
+export async function runDaemon(): Promise<void> {
   const daemon = createDaemon({
     onNote: (message) => console.log(`${stamp()} ${message}`),
     onError: (error, context) => console.error(`${stamp()} ${context}: ${error.stack ?? error}`),
@@ -37,29 +33,12 @@ async function main(): Promise<void> {
     await daemon.start();
   } catch (error) {
     removeSignalHandlers();
-    throw error;
+    console.error(
+      `${stamp()} daemon failed to start: ${error instanceof Error ? error.stack : String(error)}`,
+    );
+    process.exit(70);
   }
   console.log(
     `${stamp()} daemon ${daemon.version} listening on ${daemon.path} (pid ${process.pid})`,
   );
-}
-
-/** True only when node was pointed at this file, so an import cannot start a daemon. */
-function runDirectly(): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  const self = resolve(fileURLToPath(import.meta.url));
-  const invoked = resolve(entry);
-  return process.platform === 'win32'
-    ? self.toLowerCase() === invoked.toLowerCase()
-    : self === invoked;
-}
-
-if (runDirectly()) {
-  main().catch((error: unknown) => {
-    console.error(
-      `daemon failed to start: ${error instanceof Error ? error.stack : String(error)}`,
-    );
-    process.exit(70);
-  });
 }

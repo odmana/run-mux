@@ -1,10 +1,9 @@
 /**
  * Hosts the real OpenTUI renderer for `test/tui.test.ts`.
  *
- * It runs as a child process because the renderer needs `--experimental-ffi`
- * and vitest's own workers cannot be given the flag without editing the shared
- * vitest config. The child owns nothing but the renderer: every assertion still
- * happens in vitest, against the snapshots and frames replied over IPC.
+ * It runs as a child process so the renderer can own a terminal of its own
+ * size. The child owns nothing but the renderer: every assertion still happens
+ * in the test, against the snapshots and frames replied over IPC.
  *
  * Input is injected as raw bytes on `renderer.stdin` — real SGR-1006 for the
  * mouse, real escape sequences for keys — so the renderer's own parser and

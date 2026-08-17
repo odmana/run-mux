@@ -1,0 +1,9 @@
+[test]
+root = "test"
+# Tests spawn real processes and bind real named pipes, so two files running at
+# once make kill/backoff/socket assertions flake. `bun test` runs files serially
+# in one process, which is the guarantee vitest needed pool/maxWorkers for.
+#
+# The 20s default timeout vitest carried lives in the `test` script instead:
+# bun ignores `[test] timeout`, and a preload's `jest.setTimeout` only reaches
+# the first file.

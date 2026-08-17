@@ -1,4 +1,24 @@
-allowBuilds:
-  # vitest's bundler; its postinstall fetches the platform binary, so tests
-  # cannot run without it.
-  esbuild: true
+# Bun compiles the release binaries for every target from a single host, but it can
+# only embed a native core that is already on disk — so pnpm has to fetch OpenTUI's
+# platform packages for all of them, not just this machine's.
+supportedArchitectures:
+  os:
+    - win32
+    - linux
+    - darwin
+  cpu:
+    - x64
+    - arm64
+  libc:
+    - glibc
+    - musl
+
+# @opentui/react declares these as peers but only needs them for its devtools and
+# websocket transports, neither of which run-mux uses.
+packageExtensions:
+  '@opentui/react':
+    peerDependenciesMeta:
+      react-devtools-core:
+        optional: true
+      ws:
+        optional: true

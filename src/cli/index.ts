@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * `rmux`. Parses argv, picks a verb, and reports the result on exactly one
  * stream: under --json stdout carries JSON and nothing else, and every
@@ -6,11 +5,12 @@
  */
 
 import { isRpcFailure } from '../ipc/index.js';
+import { DAEMON_ROLE, isRole, type Role } from '../roles.js';
 import { EXIT_CODES } from '../types.js';
+import { VERSION } from '../version.js';
 import { parseArgs } from './args.js';
 import * as configCmd from './commands/config.js';
 import {
-  cliVersion,
   makeSession,
   restart as daemonRestart,
   status as daemonStatus,
@@ -162,8 +162,8 @@ async function route(ctx: Ctx): Promise<number> {
   const args = ctx.args;
 
   if (args.flags.version === true || args.flags.v === true) {
-    emit(ctx.out, { version: cliVersion() });
-    human(ctx.out, cliVersion());
+    emit(ctx.out, { version: VERSION });
+    human(ctx.out, VERSION);
     return 0;
   }
 
@@ -218,7 +218,29 @@ function toCliError(error: unknown): CliError {
   return new CliError('internal', String(error));
 }
 
+/**
+ * Each role reaches its module through a dynamic import, so an ordinary verb —
+ * `--version` above all — never loads a line of daemon or TUI code.
+ */
+async function runRole(role: Role): Promise<void> {
+  if (role === DAEMON_ROLE) {
+    const { runDaemon } = await import('../daemon/index.js');
+    await runDaemon();
+    return;
+  }
+  const { runTui } = await import('../tui/index.js');
+  await runTui();
+}
+
 async function main(): Promise<number> {
+  // Roles are dispatched before argv is parsed: they are how the binary re-execs
+  // itself, not commands, and must never collide with a verb.
+  const role = process.argv[2];
+  if (isRole(role)) {
+    await runRole(role);
+    return 0;
+  }
+
   const args = parseArgs(process.argv.slice(2));
   const out = makeOut(args.json, args.flags['no-color'] === true);
   const session = makeSession(args, out);

@@ -10,8 +10,8 @@ const FIXTURE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 
 /**
  * Builds a shell command string that runs one of the mock fixtures. Everything
- * is double-quoted because the node path and the repo path both contain spaces
- * on a normal Windows install.
+ * is double-quoted because the runtime path and the repo path both contain
+ * spaces on a normal Windows install.
  */
 export function mock(fixture: string, args: (string | number)[] = []): string {
   const script = join(FIXTURE_DIR, fixture).replaceAll('\\', '/');

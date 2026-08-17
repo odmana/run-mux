@@ -7,6 +7,8 @@ A daemon-backed CLI that runs *playbooks* — named sets of commands — against
 
 ```
 src/types.ts       shared contracts. Every module implements against this. Do not edit casually.
+src/roles.ts       the argv roles, and how the binary tells compiled from development
+src/version.ts     the only reader of package.json; the build folds the version in with --define
 src/paths.ts       every on-disk location. Honours RUN_MUX_HOME so tests stay off real user dirs.
 src/config/        global + per-repo config, validation, playbook precedence, env layering
 src/git/           worktree enumeration (read-only — run-mux never creates or removes one)
@@ -16,7 +18,9 @@ src/logs/          JSONL run store, retention, in-memory tail, queries
 src/ipc/           NDJSON over named pipe / unix socket, autospawn
 src/daemon/        command layer + daemon assembly
 src/cli/           argument parsing, human and --json output
-test/fixtures/     mock commands (node scripts) — tests never invoke real apps
+src/tui/           OpenTUI renderer, in its own process with its own daemon connection
+scripts/build.ts   compiles the release binaries — this host, or all five targets with --all
+test/fixtures/     mock commands — tests never invoke real apps
 ```
 
 ## Core rules
@@ -31,18 +35,25 @@ test/fixtures/     mock commands (node scripts) — tests never invoke real apps
   or retyped. No colour, no spinners under `--json`.
 - **Processes are daemon-scoped.** Never re-adopt a process the daemon did not spawn — you cannot
   attach to its stdout, so it would run with a permanent hole in its logs.
+- **One binary, three roles.** `rmux <verb>` is the CLI, `rmux __daemon` the daemon, `rmux __tui`
+  the TUI. A compiled executable has no scripts on disk, so the CLI re-execs *itself* with a role
+  argument rather than resolving an entry path. Never reintroduce a path-based lookup:
+  `src/roles.ts` is the only place that decides, and `RUN_MUX_DAEMON_ENTRY` / `RUN_MUX_TUI_ENTRY`
+  are the seam tests substitute stubs through.
 
 ## Tooling
 
-- **`fnm` for node versions**, pinned in `.node-version`. `fnm use` in the repo root, or set up
-  `eval "$(fnm env --use-on-cd --shell bash)"` to switch automatically.
-- `pnpm` for everything, never `npx`.
+- **Bun is the runtime, the bundler and the test runner**, pinned in `.bun-version`. No Node, no
+  `fnm`.
+- **pnpm still installs**, and the reason is not taste: `bun install` has no equivalent of pnpm's
+  `supportedArchitectures`, which is what fetches OpenTUI's native core for every platform so one
+  host can cross-compile every release binary. Never `npx`.
 - Exact versions in package.json — no `^` or `~`.
-- **Node >= 26.1 is required**, because OpenTUI's renderer calls `node:ffi` and the TUI must be
-  launched with `--experimental-ffi`. That flag does not exist on Node 22 or 24. The daemon and CLI
-  themselves run fine on older Node; the floor comes from the TUI alone.
-- `pnpm check` runs lint, format check, build and tests. `pnpm lint:fix` and `pnpm fmt` auto-fix.
-- Typecheck without writing `dist/`: `pnpm exec tsc --noEmit`.
+- `pnpm check` runs lint, format check, typecheck, build and tests. `pnpm lint:fix` and `pnpm fmt`
+  auto-fix. Typecheck alone is `pnpm typecheck`.
+- `pnpm build` compiles `dist/rmux` for this host; `pnpm build:all` cross-compiles all five targets.
+  A binary is 70–135 MB depending on platform — Bun's runtime is nearly all of it. `--bytecode` is
+  deliberately not used: it cannot compile top-level await, which OpenTUI's chunks rely on.
 
 ## Testing
 
@@ -51,8 +62,12 @@ you `ticker()`, `service()`, `spawner()`, `envDump()`, `chatty()` to build porta
 strings, plus `useTempHome()`, `makeGitRepo()`, `addWorktree()`, `waitFor()` and `isAlive()`.
 
 Never sleep a fixed duration to wait for a process — use `waitFor()`. Process tests are
-timing-sensitive and vitest is configured to run them in a single fork for that reason; they can
+timing-sensitive, and they rely on `bun test` running files serially in one process; they can
 still flake under heavy load, so re-run before assuming a change broke them.
+
+The 20s timeout is passed on the command line, in the `test` script. It has to be: Bun ignores
+`[test] timeout` in bunfig.toml, and a preload calling `jest.setTimeout()` only reaches the first
+test file.
 
 ## Style
 

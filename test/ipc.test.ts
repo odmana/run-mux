@@ -1,9 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { connect as netConnect, createServer, type Server, type Socket } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   connect,

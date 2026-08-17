@@ -3,8 +3,7 @@
 //
 //   env TUI_STUB_EXIT   the exit code to end with (default 0)
 //
-// The stdout line reports whether --experimental-ffi actually reached the child,
-// which is the whole reason the TUI is spawned rather than imported.
-process.stdout.write(`tui-stub: ffi=${process.execArgv.includes('--experimental-ffi')}\n`);
+// Writes to both streams so the caller can prove stdio was inherited, not piped.
+process.stdout.write('tui-stub: on stdout\n');
 process.stderr.write('tui-stub: on stderr\n');
 process.exit(Number.parseInt(process.env.TUI_STUB_EXIT ?? '0', 10));

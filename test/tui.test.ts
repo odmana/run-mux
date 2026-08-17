@@ -7,18 +7,16 @@
  * rendered frame, never hard-coded, so a layout change surfaces as a missing
  * row instead of a silently-passing assertion.
  *
- * The renderer lives in a child process because it needs `--experimental-ffi`
- * and vitest's workers cannot be given the flag without editing the shared
- * vitest config. Every assertion is still made here; the child only replies
- * with frames and state snapshots.
+ * The renderer lives in a child process so it can own a terminal of its own
+ * size and be torn down between cases. Every assertion is still made here; the
+ * child only replies with frames and state snapshots.
  */
 
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
 
 import { METHODS } from '../src/protocol.js';
 import { ansiToChunks, stripAnsi } from '../src/tui/ansi.js';
@@ -41,7 +39,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const DAEMON = join(ROOT, 'test', 'fixtures', 'tui-daemon.mjs');
 const HARNESS = join(ROOT, 'test', 'fixtures', 'tui-harness.ts');
-const TSX_LOADER = pathToFileURL(join(ROOT, 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 
 const WIDTH = 120;
 const HEIGHT = 30;
@@ -94,22 +91,18 @@ async function startDaemon(): Promise<void> {
 }
 
 async function boot(options: { width?: number; height?: number } = {}): Promise<Harness> {
-  const child = spawn(
-    process.execPath,
-    ['--experimental-ffi', '--no-warnings', '--import', TSX_LOADER, HARNESS],
-    {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        RUN_MUX_HOME: home.root,
-        TUI_HARNESS_WIDTH: String(options.width ?? WIDTH),
-        TUI_HARNESS_HEIGHT: String(options.height ?? HEIGHT),
-        TUI_HARNESS_COALESCE_MS: String(COALESCE_MS),
-        TUI_HARNESS_POLL_MS: '250',
-      },
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  const child = spawn(process.execPath, [HARNESS], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      RUN_MUX_HOME: home.root,
+      TUI_HARNESS_WIDTH: String(options.width ?? WIDTH),
+      TUI_HARNESS_HEIGHT: String(options.height ?? HEIGHT),
+      TUI_HARNESS_COALESCE_MS: String(COALESCE_MS),
+      TUI_HARNESS_POLL_MS: '250',
     },
-  );
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
 
   let stderr = '';
   child.stderr?.on('data', (chunk: Buffer) => {
