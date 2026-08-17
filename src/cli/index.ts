@@ -39,7 +39,7 @@ const VERBS: Record<string, Handler | Record<string, Handler>> = {
   env: configCmd.env,
   reload: configCmd.reload,
   repo: { add: repoCmd.add, ls: repoCmd.list, rm: repoCmd.remove },
-  config: { resolve: configCmd.resolve },
+  config: { resolve: configCmd.resolve, edit: configCmd.edit },
   daemon: { status: daemonStatus, stop: daemonStop, restart: daemonRestart },
 };
 
@@ -54,13 +54,15 @@ usage
   rmux add [--repo <path>]                 create a target (interactive with no args)
   rmux rm <target>                         remove a target
   rmux autostart <target> [--off]          start this target with the daemon
-  rmux repo add <path> | ls | rm <path>    registered repositories
+  rmux repo add <path> [--as <name>]       register a repository
+  rmux repo ls | rm <path>                 list or unregister one
   rmux start | stop | restart <target>     run control
   rmux restart <target> --command <label>  restart one command, not the stack
   rmux status <target> [--json]            the target and its commands
   rmux logs <target> [--follow] [--label <l>] [--since <5m>] [--tail <n>] [--json]
   rmux env <target> [--command <label>]    resolved environment, with provenance
   rmux config resolve <target>             the effective playbook, and where it came from
+  rmux config edit                         open the global config in $EDITOR, then reload
   rmux reload                              re-read config (no file watching by design)
   rmux daemon status | stop | restart      daemon lifecycle
 
@@ -138,10 +140,17 @@ The resolved environment, and which layer each variable came from:
 Without --command only the run-wide and injected layers resolve, because
 playbook env and envFile are per command.`,
   config: `rmux config resolve <target>
+rmux config edit
 
-The playbook the target would actually run, and whether it came from the repo's
-committed .run-mux.json or from your global config. A global playbook with the
-same name replaces the repo one wholesale.`,
+resolve  the playbook the target would actually run, and whether it came from
+         the repo's committed .run-mux.json or from your global config. A global
+         playbook with the same name replaces the repo one wholesale.
+edit     open the global config in $VISUAL, $EDITOR, or your platform's default,
+         then validate and reload it. An invalid config is read as empty, so you
+         are offered another pass rather than left with one.
+
+A GUI editor must be told to wait, or the reload fires before you have saved:
+set EDITOR="code -w" (or "subl -w", "gedit -w", …).`,
   reload: `rmux reload
 
 Re-reads the global config and every repo's .run-mux.json. Nothing watches files

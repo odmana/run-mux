@@ -110,13 +110,15 @@ rmux                                  # TUI
 rmux ls [--json]                      # targets and status
 rmux add | rm <target>                # create/remove a target
 rmux autostart <target> [--off]       # start this target with the daemon
-rmux repo add <path> | ls | rm <path>
+rmux repo add <path> [--as <name>]    # register a repo under a short name
+rmux repo ls | rm <path>
 rmux start | stop | restart <target>
 rmux restart <target> --command Web   # restart one command, not the stack
 rmux logs <target> [--follow] [--label Web] [--since 5m] [--tail 200] [--json]
 rmux status <target> [--json]
 rmux env <target>                     # resolved environment, with the source of each variable
 rmux config resolve <target>          # effective playbook, and where it came from
+rmux config edit                      # open the global config in $EDITOR, then reload
 rmux reload                           # re-read config (no file watching by design)
 rmux daemon status | stop | restart
 ```
@@ -128,10 +130,28 @@ Two files, two jobs:
 - **`<repo>/.run-mux.json`** — committed. Playbook definitions. Each worktree carries its own copy,
   so a branch can change its own dev commands.
 - **`%APPDATA%/run-mux/config.json`** (or `~/.config/run-mux/config.json`) — yours, uncommitted.
-  Registered repos, aliases, secrets, and playbooks you'd rather not commit.
+  Registered repos, target overrides, secrets, and playbooks you'd rather not commit. Edit it with
+  `rmux config edit`, which validates and reloads when you close the editor.
 
-A global playbook with the same name as a repo one **replaces** it wholesale — no merging. Run
-`rmux config resolve <target>` to see which one won.
+Repos are keyed by the short name you address them by, and that key is the first segment of every
+target slug — so registering `orders` gives you `orders/main:run-orders`:
+
+```json
+{
+  "repos": {
+    "orders": {
+      "path": "~/code/TicketSolutions.Orders",
+      "playbooks": [{ "name": "Run Orders", "commands": [{ "label": "Web", "command": "dotnet run" }] }]
+    }
+  },
+  "targets": {
+    "orders/feat-x:run-orders": { "env": { "ASPNETCORE_HTTP_PORTS": "5010" } }
+  }
+}
+```
+
+A playbook here with the same name as one in the repo's `.run-mux.json` **replaces** it wholesale —
+no merging. Run `rmux config resolve <target>` to see which one won.
 
 Environment precedence, lowest to highest:
 

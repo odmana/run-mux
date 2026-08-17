@@ -4,7 +4,10 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { makeOut, type Out } from '../src/cli/output.js';
+import { parseArgs } from '../src/cli/args.js';
+import * as configCmd from '../src/cli/commands/config.js';
+import type { Ctx } from '../src/cli/commands/daemon.js';
+import { CliError, makeOut, type Out } from '../src/cli/output.js';
 import { renderLogEntry, renderTargets } from '../src/cli/render.js';
 import type { TargetView } from '../src/protocol.js';
 import { EXIT_CODES } from '../src/types.js';
@@ -330,6 +333,138 @@ describe('run control', () => {
     expect(run.stdout).toContain('Worker');
     expect(run.stdout).toContain('errored');
     expect(run.stdout).toContain('5150');
+  });
+});
+
+describe('rmux config edit', () => {
+  const EDITOR_FIXTURE = resolve(ROOT, 'test', 'fixtures', 'editor.mjs').replaceAll('\\', '/');
+  const EDITOR_VARS = [
+    'EDITOR',
+    'VISUAL',
+    'RUN_MUX_TEST_EDITOR_ARGV',
+    'RUN_MUX_TEST_EDITOR_CONTENT',
+    'RUN_MUX_TEST_EDITOR_EXIT',
+  ];
+
+  /** Quoted, because both the runtime path and the repo path can contain spaces. */
+  const fixtureEditor = (): string =>
+    `"${process.execPath.replaceAll('\\', '/')}" "${EDITOR_FIXTURE}"`;
+
+  const configPath = (): string => join(home.root, 'config', 'config.json').replaceAll('\\', '/');
+
+  afterEach(() => {
+    for (const name of EDITOR_VARS) delete process.env[name];
+  });
+
+  /** `edit` refuses without a TTY, so the flow itself is driven in-process. */
+  async function withTty<T>(run: () => Promise<T>): Promise<T> {
+    const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    try {
+      return await run();
+    } finally {
+      if (descriptor) Object.defineProperty(process.stdin, 'isTTY', descriptor);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
+  }
+
+  function ctx(): Ctx {
+    return {
+      args: parseArgs(['config', 'edit']),
+      out: makeOut(false),
+      client: () => Promise.reject(new Error('config edit must not autospawn a daemon')),
+    };
+  }
+
+  async function editFailure(): Promise<CliError | undefined> {
+    return await withTty(async () => {
+      try {
+        await configCmd.edit(ctx());
+        return undefined;
+      } catch (error) {
+        return error as CliError;
+      }
+    });
+  }
+
+  it('refuses without a TTY rather than hanging on the editor', async () => {
+    const run = await rmux(['config', 'edit']);
+
+    expect(run.code).toBe(EXIT_CODES.bad_params);
+    expect(run.stderr).toContain('terminal');
+  });
+
+  it('has no --json form', async () => {
+    const run = await rmux(['config', 'edit', '--json']);
+
+    expect(run.code).toBe(EXIT_CODES.bad_params);
+    const error = onlyJson(run.stdout).error as Record<string, unknown>;
+    expect(error.code).toBe('bad_params');
+  });
+
+  it('creates the starter config before opening it', async () => {
+    process.env.EDITOR = fixtureEditor();
+    process.env.RUN_MUX_TEST_EDITOR_ARGV = join(home.root, 'argv.json').replaceAll('\\', '/');
+    expect(existsSync(configPath())).toBe(false);
+
+    await withTty(() => configCmd.edit(ctx()));
+
+    expect(readFileSync(configPath(), 'utf-8')).toContain('//');
+  });
+
+  it('passes editor arguments through and hands the config path last', async () => {
+    const argvLog = join(home.root, 'argv.json').replaceAll('\\', '/');
+    process.env.EDITOR = `${fixtureEditor()} --wait`;
+    process.env.RUN_MUX_TEST_EDITOR_ARGV = argvLog;
+
+    await withTty(() => configCmd.edit(ctx()));
+
+    const argv = JSON.parse(readFileSync(argvLog, 'utf-8')) as string[];
+    expect(argv[0]).toBe('--wait');
+    expect(argv.at(-1)?.replaceAll('\\', '/')).toBe(configPath());
+  });
+
+  it('keeps what the editor wrote when it is valid', async () => {
+    process.env.EDITOR = fixtureEditor();
+    process.env.RUN_MUX_TEST_EDITOR_CONTENT = JSON.stringify({
+      repos: { app: { path: '/code/app', playbooks: [] } },
+    });
+
+    await withTty(() => configCmd.edit(ctx()));
+
+    const saved = JSON.parse(readFileSync(configPath(), 'utf-8')) as Record<string, unknown>;
+    expect(saved.repos).toEqual({ app: { path: '/code/app', playbooks: [] } });
+  });
+
+  it('prefers $VISUAL over $EDITOR', async () => {
+    const argvLog = join(home.root, 'argv.json').replaceAll('\\', '/');
+    process.env.VISUAL = `${fixtureEditor()} --from-visual`;
+    process.env.EDITOR = 'definitely-not-an-editor-9f3a';
+    process.env.RUN_MUX_TEST_EDITOR_ARGV = argvLog;
+
+    await withTty(() => configCmd.edit(ctx()));
+
+    expect((JSON.parse(readFileSync(argvLog, 'utf-8')) as string[])[0]).toBe('--from-visual');
+  });
+
+  it('reports an editor that cannot be run, naming where it came from', async () => {
+    process.env.EDITOR = 'definitely-not-an-editor-9f3a';
+
+    const failure = await editFailure();
+
+    expect(failure?.code).toBe('not_found');
+    expect(failure?.message).toContain('definitely-not-an-editor-9f3a');
+    expect(failure?.message).toContain('$EDITOR');
+  });
+
+  it('reloads nothing when the editor exits non-zero', async () => {
+    process.env.EDITOR = fixtureEditor();
+    process.env.RUN_MUX_TEST_EDITOR_EXIT = '3';
+
+    const failure = await editFailure();
+
+    expect(failure?.code).toBe('unavailable');
+    expect(failure?.message).toContain('nothing reloaded');
   });
 });
 
