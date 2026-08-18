@@ -140,7 +140,7 @@ target slug — so registering `orders` gives you `orders/main:run-orders`:
 {
   "repos": {
     "orders": {
-      "path": "~/code/TicketSolutions.Orders",
+      "path": "~/code/Orders",
       "playbooks": [{ "name": "Run Orders", "commands": [{ "label": "Web", "command": "dotnet run" }] }]
     }
   },

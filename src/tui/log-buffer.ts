@@ -32,6 +32,8 @@ export interface LogWindow {
   lines: LogLine[];
   /** The caller's `scrollBack` clamped to what the buffer can actually offer. */
   scrollBack: number;
+  /** Every retained line the filter keeps — what the scrollbar's thumb is sized against. */
+  matching: number;
   atTop: boolean;
   atBottom: boolean;
 }
@@ -39,6 +41,11 @@ export interface LogWindow {
 const DEFAULT_RETAIN = 50_000;
 /** Trimming in blocks keeps `append` O(1) amortised instead of shifting per line. */
 const TRIM_SLACK = 2048;
+
+/** A filter that keeps everything, so the matching count is the line count. */
+function keepsEverything(filter: LogFilter): boolean {
+  return filter.labels === null && (filter.search === null || filter.search === '');
+}
 
 export function matches(line: LogLine, filter: LogFilter): boolean {
   if (filter.labels !== null && !filter.labels.has(line.label)) return false;
@@ -126,11 +133,25 @@ export class LogBuffer {
       if (matches(line, filter)) found.push(line);
     }
     const exhausted = index < 0;
+
+    // Sizing the thumb needs every matching line, not just the ones the window
+    // took. Unfiltered that is the line count; filtered it is the rest of the
+    // walk the loop above stopped early, so a window still costs one pass.
+    let matching = found.length;
+    if (keepsEverything(filter)) {
+      matching = this.#lines.length;
+    } else {
+      for (; index >= 0; index--) {
+        if (matches(this.#lines[index]!, filter)) matching++;
+      }
+    }
+
     const clamped = Math.min(Math.max(0, scrollBack), Math.max(0, found.length - rows));
     const lines = found.slice(clamped, clamped + rows).reverse();
     return {
       lines,
       scrollBack: clamped,
+      matching,
       atTop: exhausted && clamped + rows >= found.length,
       atBottom: clamped === 0,
     };

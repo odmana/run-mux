@@ -49,6 +49,11 @@ test/fixtures/     mock commands — tests never invoke real apps
   any box with `overflow: hidden`, so a clipping log pane leaves its newest line unclickable and
   impossible to start a drag-selection on. The clip belongs on the column around it, where the row
   it costs is the footer. `y` yanks a live selection ahead of the buffer, so that row matters.
+- **The log pane is virtual, so its scrollbar is drawn rather than real.** React state only ever
+  holds the rows on screen, which leaves nothing for an OpenTUI `ScrollBox` to measure a thumb
+  against: `thumb()` and `jumpTo()` in `logpane.ts` map the buffer's matching-line count onto the
+  gutter instead. A real ScrollBox would mean one renderable per retained line — the shape
+  `log-buffer.ts` exists to avoid.
 - **One binary, three roles.** `rmux <verb>` is the CLI, `rmux __daemon` the daemon, `rmux __tui`
   the TUI. A compiled executable has no scripts on disk, so the CLI re-execs *itself* with a role
   argument rather than resolving an entry path. Never reintroduce a path-based lookup:

@@ -1,7 +1,7 @@
 /** The main pane: target header, filter chips, the log stream, key hints. */
 
-import { parseColor, StyledText, type TextChunk } from '@opentui/core';
-import type { ReactElement } from 'react';
+import { parseColor, StyledText, type BoxRenderable, type TextChunk } from '@opentui/core';
+import type { ReactElement, Ref } from 'react';
 
 import type { TargetView } from '../protocol.js';
 import type { CommandState } from '../types.js';
@@ -142,13 +142,74 @@ function styled(line: LogLine, labels: readonly string[], width: number): Styled
   return new StyledText(chunks);
 }
 
+/**
+ * Where the thumb sits, in rows from the top of the gutter. The pane never holds
+ * more than `rows` lines, so the scrollbar is drawn against the buffer's count
+ * rather than against anything the renderer could measure for itself.
+ */
+export function thumb(rows: number, total: number, back: number): { top: number; size: number } {
+  if (rows <= 0) return { top: 0, size: 0 };
+  if (total <= rows) return { top: 0, size: rows };
+  const size = Math.max(1, Math.round((rows * rows) / total));
+  const first = Math.max(0, total - Math.max(0, back) - rows);
+  return { top: Math.round((first / (total - rows)) * (rows - size)), size };
+}
+
+/** The scrollBack a press on gutter row `row` asks for — the inverse of `thumb`. */
+export function jumpTo(rows: number, total: number, row: number): number {
+  if (rows <= 1 || total <= rows) return 0;
+  const fraction = Math.min(1, Math.max(0, row / (rows - 1)));
+  return total - rows - Math.round(fraction * (total - rows));
+}
+
 export interface LogPaneProps {
   lines: readonly LogLine[];
   labels: readonly string[];
   width: number;
+  /** The rows the pane can draw, which is the gutter's height too. */
+  height: number;
+  matching: number;
+  scrollBack: number;
   empty: string;
   onScroll: (direction: 'up' | 'down', delta: number) => void;
   onLine: (line: LogLine, x: number, y: number) => void;
+  /** The absolute row a press or drag landed on; the caller owns the geometry. */
+  onGutter: (y: number) => void;
+  gutterRef?: Ref<BoxRenderable>;
+}
+
+/**
+ * The scrollbar. Its glyphs opt out of selection for the sidebar's reason: a
+ * press on selectable text starts a text selection, and the drag events would
+ * then never reach the handler that moves the view.
+ */
+function Gutter(props: LogPaneProps): ReactElement {
+  const { top, size } = thumb(props.height, props.matching, props.scrollBack);
+  const cells: ReactElement[] = [];
+  for (let row = 0; row < props.height; row++) {
+    const held = row >= top && row < top + size;
+    cells.push(
+      text(
+        {
+          key: row,
+          selectable: false,
+          style: { height: 1, flexShrink: 0, fg: held ? UI.muted : UI.border },
+        },
+        held ? '█' : '░',
+      ),
+    );
+  }
+
+  return box(
+    {
+      id: 'log-scroll',
+      ref: props.gutterRef,
+      style: { width: 1, flexShrink: 0, flexDirection: 'column' },
+      onMouseDown: (event) => props.onGutter(event.y),
+      onMouseDrag: (event) => props.onGutter(event.y),
+    },
+    ...cells,
+  );
 }
 
 export function LogPane(props: LogPaneProps): ReactElement {
@@ -173,7 +234,7 @@ export function LogPane(props: LogPaneProps): ReactElement {
       id: 'log-pane',
       style: {
         flexGrow: 1,
-        flexDirection: 'column',
+        flexDirection: 'row',
         border: true,
         borderColor: UI.border,
       },
@@ -185,7 +246,8 @@ export function LogPane(props: LogPaneProps): ReactElement {
         }
       },
     },
-    ...rows,
+    box({ key: 'rows', id: 'log-rows', style: { flexGrow: 1, flexDirection: 'column' } }, ...rows),
+    Gutter(props),
   );
 }
 

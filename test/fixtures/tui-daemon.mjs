@@ -394,8 +394,13 @@ const METHODS = {
   'ui.set': (params) => ({ ui: saveUi(params?.ui ?? {}) }),
 };
 
-/** stream id -> { target, emit } for every open follow, across every socket. */
+/**
+ * Every open follow, across every socket. The key is its own counter rather than
+ * the request id: ids restart with each connection, so two live sockets would
+ * otherwise collide and one would drop the other's entry.
+ */
 const followers = new Map();
+let nextFollow = 0;
 
 const TEST_METHODS = {
   'test.flood': (params) => {
@@ -414,10 +419,13 @@ const TEST_METHODS = {
     }
     return { sent, followers: followers.size };
   },
-  'test.followers': () => ({
-    count: followers.size,
-    targets: [...followers.values()].map((f) => f.target),
-  }),
+  // Scoped to the asking connection. A harness that has gone away can leave its
+  // socket open long enough to be counted, and its follows are nobody's business
+  // but its own.
+  'test.followers': (params, socket) => {
+    const mine = [...followers.values()].filter((follower) => follower.socket === socket);
+    return { count: mine.length, targets: mine.map((follower) => follower.target) };
+  },
   // Grows target.list past what the sidebar can show. `{count: 0}` restores.
   'test.targets': (params) => {
     const count = Math.max(0, Number(params?.count ?? 0));
@@ -445,9 +453,10 @@ const TEST_METHODS = {
 };
 
 const SUBSCRIPTIONS = {
-  'logs.follow': (params, emit, id) => {
+  'logs.follow': (params, emit, id, socket) => {
     const target = resolveTarget(params);
-    followers.set(id, { target: target.slug, emit });
+    const key = ++nextFollow;
+    followers.set(key, { target: target.slug, emit, socket });
     // A target with no live run reports no commands, so its chips can only be
     // ordered from its playbook. Replaying its history backwards is what makes
     // that visible: arrival order and playbook order disagree.
@@ -456,7 +465,7 @@ const SUBSCRIPTIONS = {
       if (params.label && entry.label !== params.label) continue;
       emit.data({ ...entry, ts: Date.now() });
     }
-    return () => followers.delete(id);
+    return () => followers.delete(key);
   },
 };
 
@@ -493,6 +502,11 @@ const server = createServer((socket) => {
   socket.on('close', () => {
     for (const stop of streams.values()) stop();
     streams.clear();
+    // A follow must not outlive its socket even if it never reached `streams` —
+    // `test.followers` is an assertion in its own right.
+    for (const [key, follower] of followers) {
+      if (follower.socket === socket) followers.delete(key);
+    }
   });
   socket.on('error', () => {});
 
@@ -537,7 +551,7 @@ const server = createServer((socket) => {
       let stop;
       try {
         write({ id, ok: true, result: { subscribed: true, stream: id } });
-        stop = subscribe(params ?? {}, emit, id);
+        stop = subscribe(params ?? {}, emit, id, socket);
       } catch (error) {
         write({ id, ok: false, error: { code: error.code ?? 'internal', message: error.message } });
         return;
@@ -555,7 +569,7 @@ const server = createServer((socket) => {
       return;
     }
     try {
-      write({ id, ok: true, result: handler(params ?? {}) });
+      write({ id, ok: true, result: handler(params ?? {}, socket) });
     } catch (error) {
       write({ id, ok: false, error: { code: error.code ?? 'internal', message: error.message } });
     }

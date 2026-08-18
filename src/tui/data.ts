@@ -364,6 +364,8 @@ export interface LogStream {
   /** The only log state React holds: at most `height` lines. */
   visible: LogLine[];
   scrollBack: number;
+  /** Retained lines the filter keeps — the scrollbar's scale. */
+  matching: number;
   atTop: boolean;
   atBottom: boolean;
   /** Lines the buffer has ever seen, dropped-by-filter and scrolled-past included. */
@@ -372,6 +374,8 @@ export interface LogStream {
   labels: string[];
   error: string | null;
   scrollBy: (rows: number) => void;
+  /** Absolute, for the scrollbar: rows back from the tail. */
+  scrollTo: (back: number) => void;
   toTop: () => void;
   toBottom: () => void;
   /** The filtered window as plain text, for `y`. */
@@ -397,7 +401,7 @@ export function useLogStream(options: LogStreamOptions): LogStream {
   const scrollBackRef = useRef(0);
 
   const [visible, setVisible] = useState<LogLine[]>([]);
-  const [edges, setEdges] = useState({ atTop: false, atBottom: true, scrollBack: 0 });
+  const [edges, setEdges] = useState({ atTop: false, atBottom: true, scrollBack: 0, matching: 0 });
   const [counts, setCounts] = useState({ total: 0, retained: 0 });
   const [labels, setLabels] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -409,7 +413,12 @@ export function useLogStream(options: LogStreamOptions): LogStream {
     const view = buffer.current.window(filterRef.current, heightRef.current, nextBack);
     scrollBackRef.current = view.scrollBack;
     setVisible(view.lines);
-    setEdges({ atTop: view.atTop, atBottom: view.atBottom, scrollBack: view.scrollBack });
+    setEdges({
+      atTop: view.atTop,
+      atBottom: view.atBottom,
+      scrollBack: view.scrollBack,
+      matching: view.matching,
+    });
     setCounts({ total: buffer.current.total, retained: buffer.current.retained });
   }, []);
 
@@ -419,7 +428,7 @@ export function useLogStream(options: LogStreamOptions): LogStream {
     pending.current = [];
     scrollBackRef.current = 0;
     setVisible([]);
-    setEdges({ atTop: false, atBottom: true, scrollBack: 0 });
+    setEdges({ atTop: false, atBottom: true, scrollBack: 0, matching: 0 });
     setCounts({ total: 0, retained: 0 });
     setLabels([]);
     setError(null);
@@ -485,6 +494,7 @@ export function useLogStream(options: LogStreamOptions): LogStream {
     (rows: number) => project(Math.max(0, scrollBackRef.current + rows)),
     [project],
   );
+  const scrollTo = useCallback((back: number) => project(Math.max(0, back)), [project]);
   const toTop = useCallback(() => project(Number.MAX_SAFE_INTEGER), [project]);
   const toBottom = useCallback(() => project(0), [project]);
   const snapshot = useCallback(
@@ -495,6 +505,7 @@ export function useLogStream(options: LogStreamOptions): LogStream {
   return {
     visible,
     scrollBack: edges.scrollBack,
+    matching: edges.matching,
     atTop: edges.atTop,
     atBottom: edges.atBottom,
     total: counts.total,
@@ -502,6 +513,7 @@ export function useLogStream(options: LogStreamOptions): LogStream {
     labels,
     error,
     scrollBy,
+    scrollTo,
     toTop,
     toBottom,
     snapshot,

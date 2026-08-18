@@ -24,6 +24,7 @@ import type { AppSnapshot, PickerSnapshot } from '../src/tui/app.js';
 import { elideStart } from '../src/tui/format.js';
 import { fuzzyMatch, fuzzyRank } from '../src/tui/fuzzy.js';
 import { ALL, LogBuffer } from '../src/tui/log-buffer.js';
+import { jumpTo, thumb } from '../src/tui/logpane.js';
 import { moveInto, sortByOrder } from '../src/tui/order.js';
 import {
   applyFieldValue,
@@ -199,6 +200,8 @@ function rowOf(frame: string[], needle: string, cols?: [number, number]): number
 
 const SIDE: [number, number] = [1, SIDEBAR_WIDTH];
 const MAIN: [number, number] = [SIDEBAR_WIDTH + 1, WIDTH];
+/** The log pane's scrollbar: the column inside its right border. */
+const GUTTER = WIDTH - 1;
 
 function colOf(frame: string[], row: number, needle: string): number {
   const line = frame[row - 1] ?? '';
@@ -294,6 +297,46 @@ describe('log buffer', () => {
     const only = buffer.window({ labels: new Set(['A']), search: null }, 5, 0);
     expect(only.lines.every((line) => line.label === 'A')).toBe(true);
     expect(buffer.retained).toBe(30);
+  });
+
+  it('counts every matching line, not just the windowed ones', () => {
+    const buffer = new LogBuffer();
+    for (let i = 0; i < 30; i++) {
+      buffer.append({ ts: i, label: i % 3 === 0 ? 'A' : 'B', stream: 'stdout', text: `l${i}\n` });
+    }
+    expect(buffer.window(ALL, 5, 0).matching).toBe(30);
+    expect(buffer.window({ labels: new Set(['A']), search: null }, 5, 0).matching).toBe(10);
+    expect(buffer.window({ labels: null, search: 'l1' }, 5, 0).matching).toBe(11);
+  });
+});
+
+describe('log scrollbar', () => {
+  it('parks a full-height thumb while everything fits', () => {
+    expect(thumb(24, 10, 0)).toEqual({ top: 0, size: 24 });
+    expect(thumb(24, 24, 0)).toEqual({ top: 0, size: 24 });
+  });
+
+  it('sizes the thumb by the share on screen and sinks it to the tail', () => {
+    const tail = thumb(24, 240, 0);
+    expect(tail.size).toBe(2);
+    expect(tail.top).toBe(24 - tail.size);
+
+    const top = thumb(24, 240, 216);
+    expect(top.top).toBe(0);
+    expect(top.size).toBe(tail.size);
+
+    const middle = thumb(24, 240, 108);
+    expect(middle.top).toBeGreaterThan(0);
+    expect(middle.top).toBeLessThan(tail.top);
+  });
+
+  it('answers a press with the scrollBack that row stands for', () => {
+    expect(jumpTo(24, 240, 23)).toBe(0);
+    expect(jumpTo(24, 240, 0)).toBe(216);
+    expect(jumpTo(24, 10, 0)).toBe(0);
+    // A press where the thumb already sits lands back within the row it covers.
+    const rowWorth = Math.ceil((240 - 24) / 23);
+    expect(Math.abs(jumpTo(24, 240, thumb(24, 240, 108).top) - 108)).toBeLessThanOrEqual(rowWorth);
   });
 });
 
@@ -969,7 +1012,52 @@ describe('log pane throughput', () => {
     await tui.send({ op: 'keys', keys: ['g'] });
     expect(tui.snapshot().scrollBack).toBeGreaterThan(0);
   }, 40_000);
+
+  it('draws a scrollbar that tracks the view', async () => {
+    const tui = await boot();
+    await tui.send({ op: 'request', method: 'test.flood', params: { lines: 500 } });
+    await tui.send({ op: 'settle', ms: 300 });
+
+    const held = (frame: string[]): number[] =>
+      frame.flatMap((line, index) => (line[GUTTER - 1] === '█' ? [index + 1] : []));
+
+    // 500 lines through a 24-row pane: a short thumb, parked at the tail.
+    const tail = held(tui.frame());
+    expect(tail.length).toBeGreaterThan(0);
+    expect(tail.length).toBeLessThan(HEIGHT - 6);
+    expect(tail.at(-1)).toBe(rowOf(tui.frame(), '└', MAIN) - 1);
+
+    await tui.send({ op: 'wheel', col: SIDEBAR_WIDTH + 20, row: 8, dir: 'up', n: 60 });
+    await tui.send({ op: 'settle', ms: 200 });
+    const scrolled = held(tui.frame());
+    expect(scrolled[0]).toBeLessThan(tail[0]!);
+    expect(scrolled.length).toBe(tail.length);
+  }, 40_000);
+
+  it('jumps the view when the scrollbar is pressed and dragged', async () => {
+    const tui = await boot();
+    await tui.send({ op: 'request', method: 'test.flood', params: { lines: 500 } });
+    await tui.send({ op: 'settle', ms: 300 });
+    const top = rowOf(tui.frame(), '┌', MAIN) + 1;
+    const bottom = rowOf(tui.frame(), '└', MAIN) - 1;
+
+    await tui.send({ op: 'click', col: GUTTER, row: top });
+    await tui.send({ op: 'settle', ms: 200 });
+    const back = tui.snapshot().scrollBack;
+    expect(back).toBeGreaterThan(0);
+    expect(tui.snapshot().totalLines - back).toBeLessThanOrEqual(HEIGHT);
+
+    // Dragging the thumb back down to the last row returns to the tail.
+    await tui.send({ op: 'drag', fromCol: GUTTER, fromRow: top, toCol: GUTTER, toRow: bottom });
+    await tui.send({ op: 'settle', ms: 200 });
+    expect(tui.snapshot().scrollBack).toBe(0);
+  }, 40_000);
 });
+
+async function followers(tui: Harness): Promise<{ count: number; targets: string[] }> {
+  const reply = await tui.send({ op: 'request', method: 'test.followers' });
+  return reply.result as { count: number; targets: string[] };
+}
 
 describe('subscriptions', () => {
   it('unsubscribes logs.follow when the selection changes', async () => {
@@ -985,11 +1073,9 @@ describe('subscriptions', () => {
 
     const after = requestLog();
     expect(after.filter((entry) => entry.method === '$unsubscribe').length).toBe(unsubsBefore + 1);
-    // Exactly one follow is live: the new selection's.
-    const live = (await tui.send({ op: 'request', method: 'test.followers' })).result as {
-      count: number;
-      targets: string[];
-    };
+
+    // Exactly one follow is live on this connection: the new selection's.
+    const live = await followers(tui);
     expect(live.count).toBe(1);
     expect(live.targets).toEqual([ROWS[1]!.slug]);
   }, 40_000);

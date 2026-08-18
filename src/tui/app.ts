@@ -7,7 +7,7 @@
  * Tab-focus model costs a keystroke on every interaction and buys nothing.
  */
 
-import type { KeyEvent, ScrollBoxRenderable } from '@opentui/core';
+import type { BoxRenderable, KeyEvent, ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 
@@ -33,6 +33,7 @@ import {
   Footer,
   Header,
   HEADER_HEIGHT,
+  jumpTo,
   LogPane,
 } from './logpane.js';
 import { moveInto, NO_ORDER, sortByOrder, type SidebarOrder } from './order.js';
@@ -188,6 +189,7 @@ export function App(props: AppProps): ReactElement {
   const [dragging, setDragging] = useState<DragHandle | null>(null);
   const hitSeq = useRef(0);
   const sidebarBox = useRef<ScrollBoxRenderable | null>(null);
+  const logGutter = useRef<BoxRenderable | null>(null);
   // The width as of the last drag event, not the last commit: `drag-end` has to
   // persist what the pointer actually landed on, and React may not have rendered it yet.
   const widthRef = useRef(SIDEBAR_WIDTH);
@@ -965,6 +967,17 @@ export function App(props: AppProps): ReactElement {
         lines: logs.visible.length > logHeight ? logs.visible.slice(-logHeight) : logs.visible,
         labels,
         width: mainWidth,
+        height: logHeight,
+        matching: logs.matching,
+        scrollBack: logs.scrollBack,
+        gutterRef: logGutter,
+        // The event carries screen coordinates, and only the renderable knows
+        // where the gutter starts, so the row is worked out from its own box.
+        onGutter: (y: number) => {
+          const top = logGutter.current?.y ?? 0;
+          const row = Math.min(logHeight - 1, Math.max(0, y - top));
+          logs.scrollTo(jumpTo(logHeight, logs.matching, row));
+        },
         empty:
           logs.error !== null
             ? `  ${logs.error}`
