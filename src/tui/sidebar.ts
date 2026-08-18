@@ -11,7 +11,7 @@ import { sortByOrder, type SidebarOrder } from './order.js';
 import { TARGET_COLOUR, TARGET_DOT, UI } from './theme.js';
 
 export const SIDEBAR_WIDTH = 32;
-/** Below this the branch and slot columns collapse into nothing useful. */
+/** Below this the branch and elapsed columns collapse into nothing useful. */
 export const SIDEBAR_MIN_WIDTH = 20;
 /** The log pane is the point of the TUI; the sidebar never squeezes it past this. */
 export const MAIN_MIN_WIDTH = 24;
@@ -138,12 +138,11 @@ export interface SidebarProps {
 interface Columns {
   name: number;
   branch: number;
-  slot: number;
   elapsed: number;
 }
 
 /**
- * Two lines per target: `dot + name`, then an indented `branch + slot + elapsed`.
+ * Two lines per target: `dot + name`, then an indented `branch + elapsed`.
  * A single line forced the name through a 12-column gap, which truncated every
  * real slug to something like `main:demo-st…`.
  */
@@ -152,10 +151,10 @@ export const ROW_HEIGHT = 2;
 function columns(width: number): Columns {
   const inner = Math.max(10, width - 2);
   const name = Math.max(6, inner - 3);
-  const elapsed = 6;
-  const slot = 7;
-  const branch = Math.max(4, inner - 3 - slot - elapsed);
-  return { name, branch, slot, elapsed };
+  // 7 so the widest `formatElapsed` tier, `59m 59s`, is not clipped to `59m 5…`.
+  const elapsed = 7;
+  const branch = Math.max(4, inner - 3 - elapsed);
+  return { name, branch, elapsed };
 }
 
 function header(props: SidebarProps, group: RepoGroup, width: number): ReactElement {
@@ -279,10 +278,11 @@ function row(props: SidebarProps, target: TargetView, cols: Columns): ReactEleme
   }
 
   detail.push(
-    label({ key: 'slot', style: { fg: UI.muted } }, padTo(`slot ${target.slot}`, cols.slot)),
     label(
       { key: 'elapsed', style: { fg: UI.muted } },
-      padTo(fit(elapsedSince(target.startedAt, props.now), cols.elapsed), cols.elapsed),
+      // Right-aligned: the tiers differ in width, and a ragged left edge reads
+      // better than a run time that appears to drift as it ticks over.
+      fit(elapsedSince(target.startedAt, props.now), cols.elapsed).padStart(cols.elapsed),
     ),
   );
 

@@ -627,7 +627,7 @@ describe('mouse hit-testing', () => {
     await tui.send({ op: 'settle', ms: 300 });
 
     const at = rowOf(tui.frame(), row.name, SIDE);
-    // A target occupies two lines: the name, then branch/slot/elapsed. The hover
+    // A target occupies two lines: the name, then branch/elapsed. The hover
     // controls take the branch column on that second line.
     const detail = at + 1;
     expect(tui.frame()[detail - 1]).not.toContain('■');
