@@ -17,7 +17,7 @@ export interface PlaybookCommand {
   type?: CommandKind;
   /** Labels that must have exited 0 before this command spawns. */
   dependsOn?: string[];
-  /** Defaults to 'never' for a task, 'on-failure' for a service. */
+  /** Defaults to 'never': a command that dies stays dead until restarted by hand. */
   restart?: RestartPolicy;
   /** Relative to the checkout root. */
   cwd?: string;

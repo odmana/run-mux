@@ -469,8 +469,13 @@ function kindOf(spec: PlaybookCommand): CommandKind {
   return spec.type ?? 'service';
 }
 
+/**
+ * Nothing restarts unless the playbook asks for it. A service that dies is
+ * usually a compile error or a taken port, and respawning it buries the output
+ * that says so under the next attempt's.
+ */
 function policyOf(spec: PlaybookCommand): RestartPolicy {
-  return spec.restart ?? (kindOf(spec) === 'task' ? 'never' : 'on-failure');
+  return spec.restart ?? 'never';
 }
 
 /**

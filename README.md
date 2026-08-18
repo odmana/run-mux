@@ -78,10 +78,15 @@ Commit a `.run-mux.json` at your repo root:
 
 - **`task`** — must exit 0. Gates anything that `dependsOn` it. If it fails, its dependents don't
   start; unrelated commands keep running.
-- **`service`** (the default) — runs indefinitely. Restarts on failure with backoff. Never cascades.
+- **`service`** (the default) — runs indefinitely. Never cascades.
 
 `dependsOn` gates on exit code 0, so it may only name a `task`. Naming a `service` is a config
 error, caught at load — otherwise the dependent would wait forever for something that never exits.
+
+**Nothing restarts by itself.** A command that dies stays dead and shows as `errored`; bring it
+back with `rmux restart <target> --command <label>`, or `↻` in the TUI. Opt a command in with
+`"restart": "on-failure"` (respawn on a non-zero exit, with backoff) or `"always"` (respawn on any
+exit, which turns a `task` into a poll loop).
 
 ## Worktrees and ports
 

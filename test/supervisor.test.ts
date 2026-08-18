@@ -220,6 +220,7 @@ describe('restart policy', () => {
     const harness = launch([
       {
         label: 'api',
+        restart: 'on-failure',
         command: service(['--label', 'api', '--crash-after', '80', '--exit', '7']),
       },
     ]);
@@ -227,6 +228,25 @@ describe('restart policy', () => {
     await waitFor(() => harness.state('api').restarts >= 2, { label: 'two restarts' });
     await waitFor(() => harness.state('api').status === 'running', { label: 'back up' });
     expect(harness.state('api').pid).toBeDefined();
+  });
+
+  it('leaves a crashing service dead when the playbook asks for no policy', async () => {
+    const harness = launch([
+      {
+        label: 'api',
+        command: service(['--label', 'api', '--crash-after', '60', '--exit', '7']),
+      },
+      {
+        label: 'clock',
+        type: 'task',
+        command: ticker(['--lines', '6', '--interval', '60', '--label', 'clock']),
+      },
+    ]);
+
+    await waitFor(() => harness.state('clock').status === 'exited', { label: 'clock done' });
+
+    expect(harness.state('api').status).toBe('errored');
+    expect(harness.state('api').restarts).toBe(0);
   });
 
   it('does not restart under never, and the run reports failed', async () => {

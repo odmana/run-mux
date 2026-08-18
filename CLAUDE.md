@@ -28,6 +28,10 @@ test/fixtures/     mock commands — tests never invoke real apps
 - **A `task` must exit 0 and gates its dependents; a `service` runs long and never cascades.**
   `dependsOn` gates on exit code 0 only. Depending on a `service` is a config validation error,
   because it would sit in `pending` forever.
+- **Nothing restarts unless the playbook says so.** `restart` defaults to `never` for both kinds:
+  a service that dies is usually a compile error or a taken port, and respawning it buries the
+  output that says so. `on-failure` and `always` are opt-in, per command, and only then does the
+  backoff tracker come into play.
 - **Slots are per-repo and the main worktree is always 0**, so `main` keeps the ports the repo's
   own config already expects. Slots persist — a port that moves between runs is useless.
 - **`--json` is an API.** stdout is pure JSON, diagnostics go to stderr, streams are one object
