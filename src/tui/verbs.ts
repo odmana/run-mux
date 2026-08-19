@@ -8,7 +8,7 @@
  * asserts the same thing at runtime against `METHODS`.
  */
 
-import { METHODS } from '../protocol.js';
+import { METHODS, type TargetView } from '../protocol.js';
 
 export type MethodName = (typeof METHODS)[keyof typeof METHODS];
 
@@ -37,6 +37,13 @@ export type FieldKind =
   | 'checkout'
   | 'playbook';
 
+/**
+ * The `TargetView` keys a field may be seeded from — the identifiers a picker
+ * would otherwise ask for, and only those: seeding a slug or a slot would put a
+ * value in a box the daemon reads differently.
+ */
+export type SeedKey = 'repoPath' | 'checkoutPath' | 'playbookName';
+
 export interface VerbField {
   name: string;
   label: string;
@@ -49,6 +56,13 @@ export interface VerbField {
    * this one rather than letting a mismatched pair reach the daemon.
    */
   scopeField?: string;
+  /**
+   * The `TargetView` key this field opens with, taken from whichever target the
+   * sidebar has selected. Adding a target is nearly always "the same repo and
+   * playbook, a different worktree", so the two that do not change are answered
+   * before the form is drawn.
+   */
+  seedFrom?: SeedKey;
 }
 
 export interface Verb {
@@ -131,6 +145,7 @@ export const VERBS: Record<VerbMethodName, Verb> = {
         kind: 'repo',
         required: true,
         placeholder: 'pick a registered repo',
+        seedFrom: 'repoPath',
       },
       {
         name: 'checkoutPath',
@@ -147,6 +162,7 @@ export const VERBS: Record<VerbMethodName, Verb> = {
         required: true,
         placeholder: 'pick a playbook',
         scopeField: 'repoPath',
+        seedFrom: 'playbookName',
       },
     ],
     mutates: true,
@@ -278,6 +294,30 @@ export function filterVerbs(query: string): Verb[] {
   return VERB_LIST.filter((verb) =>
     `${verb.title} ${verb.method} ${verb.cli} ${verb.hint}`.toLowerCase().includes(needle),
   );
+}
+
+/**
+ * The values a form opens with, read off the selected target.
+ *
+ * Nothing here is checked against a picker's list, because the caches are empty
+ * the moment a form opens — but a repo and a playbook taken from the *same*
+ * target are consistent by construction, which is all `applyFieldValue` could
+ * have proved. A field whose seed no longer resolves is one the daemon rejects
+ * by name, the same as a stale pick.
+ */
+export function seedValues(
+  verb: Verb,
+  slug: string,
+  from: TargetView | undefined,
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const field of verb.fields) {
+    if (field.kind === 'target') values[field.name] = slug;
+    else if (field.seedFrom !== undefined && from !== undefined) {
+      values[field.name] = from[field.seedFrom];
+    }
+  }
+  return values;
 }
 
 /** Coerces the form's strings into the params the method actually declares. */

@@ -41,7 +41,13 @@ import {
   MAIN_MIN_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from '../src/tui/sidebar.js';
-import { INTERNAL_METHODS, VERBS, VERB_LIST, type FieldKind } from '../src/tui/verbs.js';
+import {
+  INTERNAL_METHODS,
+  seedValues,
+  VERBS,
+  VERB_LIST,
+  type FieldKind,
+} from '../src/tui/verbs.js';
 import { useTempHome } from './helpers.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -229,6 +235,15 @@ async function openVerb(tui: Harness, query: string): Promise<void> {
   await tui.send({ op: 'keys', keys: ['\r'] });
 }
 
+/**
+ * `Add target` opens on the selected target's repo and playbook; the tests that
+ * exercise the pickers themselves want all three fields blank. Clearing the repo
+ * cascades, so one backspace empties the form.
+ */
+async function blankAddTarget(tui: Harness): Promise<void> {
+  await tui.send({ op: 'keys', keys: ['\u001b[A', '\u007f'] });
+}
+
 function pickerOf(tui: Harness): PickerSnapshot {
   const state = tui.snapshot().picker;
   if (state === null) throw new Error(`no picker open (mode: ${tui.snapshot().mode})`);
@@ -374,6 +389,26 @@ describe('command palette coverage', () => {
       expect(Object.values(METHODS)).toContain(verb.method);
       expect(VERBS[verb.method]).toBe(verb);
     }
+  });
+
+  it('opens Add target on the repo and playbook of the selection, never its worktree', () => {
+    const from = {
+      slug: 'orders/main:run-orders',
+      repoPath: '/projects/orders',
+      checkoutPath: '/projects/orders',
+      playbookName: 'Run Orders',
+    } as TargetView;
+    expect(seedValues(VERBS[METHODS.targetAdd], from.slug, from)).toEqual({
+      repoPath: '/projects/orders',
+      playbookName: 'Run Orders',
+    });
+  });
+
+  it('seeds a slug into every target field, and nothing at all with no selection', () => {
+    expect(seedValues(VERBS[METHODS.runRestart], 'billing/main:dev', undefined)).toEqual({
+      target: 'billing/main:dev',
+    });
+    expect(seedValues(VERBS[METHODS.targetAdd], '', undefined)).toEqual({});
   });
 });
 
@@ -1163,6 +1198,9 @@ describe('fuzzy pickers', () => {
     const before = requestLog().length;
     await openVerb(tui, 'add target');
     expect(tui.snapshot().formMethod).toBe(METHODS.targetAdd);
+    await blankAddTarget(tui);
+    expect(tui.snapshot().formValues.repoPath).toBe('');
+    expect(tui.snapshot().formValues.playbookName).toBe('');
 
     await tui.send({ op: 'keys', keys: ['o', 'r', 'd'] });
     await tui.send({ op: 'settle', ms: 300 });
@@ -1205,9 +1243,42 @@ describe('fuzzy pickers', () => {
     expect(since.filter((entry) => entry.method === METHODS.repoList).length).toBe(1);
   }, 60_000);
 
+  it('opens Add target ready for a worktree and nothing else', async () => {
+    const tui = await boot();
+    const before = requestLog().length;
+    await tui.send({ op: 'keys', keys: ['j', 'j'] });
+    await openVerb(tui, 'add target');
+    expect(tui.snapshot().formValues).toEqual({
+      repoPath: '/projects/billing',
+      playbookName: 'dev',
+    });
+
+    // Focus skipped the two seeded fields, so Enter opens the checkout picker
+    // rather than submitting a form that is one worktree short.
+    await tui.send({ op: 'keys', keys: ['\r'] });
+    await tui.send({ op: 'settle', ms: 300 });
+    expect(pickerOf(tui).kind).toBe('checkout');
+    expect(pickerOf(tui).rows.map((row) => row.label)).toEqual(['main']);
+
+    await tui.send({ op: 'keys', keys: ['\r'] });
+    await tui.send({ op: 'keys', keys: ['\r'] });
+    await tui.send({ op: 'settle', ms: 300 });
+    expect(
+      requestLog()
+        .slice(before)
+        .filter((entry) => entry.method === METHODS.targetAdd)
+        .pop()?.params,
+    ).toEqual({
+      repoPath: '/projects/billing',
+      checkoutPath: '/projects/billing',
+      playbookName: 'dev',
+    });
+  }, 60_000);
+
   it('narrows as you type and marks the characters the query hit', async () => {
     const tui = await boot();
     await openVerb(tui, 'add target');
+    await blankAddTarget(tui);
     await tui.send({ op: 'keys', keys: ['\r'] });
     await tui.send({ op: 'settle', ms: 300 });
 
@@ -1233,6 +1304,7 @@ describe('fuzzy pickers', () => {
   it('says which field to answer first instead of listing every checkout', async () => {
     const tui = await boot();
     await openVerb(tui, 'add target');
+    await blankAddTarget(tui);
     await tui.send({ op: 'keys', keys: ['\t'] });
     await tui.send({ op: 'keys', keys: ['\r'] });
     await tui.send({ op: 'settle', ms: 200 });
@@ -1246,6 +1318,7 @@ describe('fuzzy pickers', () => {
   it('scopes checkouts to the chosen repo and invalidates them when it changes', async () => {
     const tui = await boot();
     await openVerb(tui, 'add target');
+    await blankAddTarget(tui);
     await tui.send({ op: 'keys', keys: ['o', 'r', 'd'] });
     await tui.send({ op: 'settle', ms: 300 });
     await tui.send({ op: 'keys', keys: ['\r'] });
@@ -1278,6 +1351,7 @@ describe('fuzzy pickers', () => {
   it('picks a row with the mouse', async () => {
     const tui = await boot();
     await openVerb(tui, 'add target');
+    await blankAddTarget(tui);
     await tui.send({ op: 'keys', keys: ['\r'] });
     await tui.send({ op: 'settle', ms: 300 });
 
@@ -1293,6 +1367,7 @@ describe('fuzzy pickers', () => {
     const tui = await boot();
     const before = requestLog().length;
     await openVerb(tui, 'add target');
+    await blankAddTarget(tui);
     await tui.send({ op: 'keys', keys: ['\r'] });
     await tui.send({ op: 'settle', ms: 300 });
     expect(tui.snapshot().mode).toBe('picker');
@@ -1347,6 +1422,7 @@ describe('fuzzy pickers', () => {
     try {
       await tui.send({ op: 'request', method: 'test.repos', params: { count: 40 } });
       await openVerb(tui, 'add target');
+      await blankAddTarget(tui);
       await tui.send({ op: 'keys', keys: ['\r'] });
       await tui.send({ op: 'settle', ms: 400 });
 

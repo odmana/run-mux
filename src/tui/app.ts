@@ -59,7 +59,7 @@ import {
   type SidebarClick,
 } from './sidebar.js';
 import { UI } from './theme.js';
-import { buildParams, filterVerbs, missingFields, type Verb } from './verbs.js';
+import { buildParams, filterVerbs, missingFields, seedValues, type Verb } from './verbs.js';
 
 export type Mode = 'browse' | 'palette' | 'form' | 'picker' | 'search' | 'command';
 
@@ -161,6 +161,19 @@ function nextField(verb: Verb, values: Record<string, string>, from: number): nu
     if ((values[field.name] ?? '').trim() === '') return index;
   }
   return from;
+}
+
+/**
+ * Where a fresh form opens: the first *required* field its seeds did not answer,
+ * so `Add target` starts on the worktree. An optional field never takes the
+ * cursor — a seeded `Query logs` still opens on its target, where Enter means
+ * "run it" rather than "and now answer `tail`".
+ */
+function openingField(verb: Verb, values: Record<string, string>): number {
+  const at = verb.fields.findIndex(
+    (field) => field.required === true && (values[field.name] ?? '').trim() === '',
+  );
+  return at < 0 ? 0 : at;
 }
 
 export function App(props: AppProps): ReactElement {
@@ -374,11 +387,10 @@ export function App(props: AppProps): ReactElement {
         void call(verb.method, undefined, verb.title);
         return;
       }
-      const values: Record<string, string> = {};
-      for (const field of verb.fields) {
-        if (field.kind === 'target') values[field.name] = prefilled.current ?? selected ?? '';
-      }
-      setForm({ verb, values, field: 0 });
+      const slug = prefilled.current ?? selected ?? '';
+      const from = sourceRef.current.targets.find((candidate) => candidate.slug === slug);
+      const values = seedValues(verb, slug, from);
+      setForm({ verb, values, field: openingField(verb, values) });
       setMode('form');
     },
     [call, selected],
